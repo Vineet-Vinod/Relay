@@ -8,8 +8,10 @@
 import Foundation
 
 enum VoiceTurnEndCue {
+    static let token = "over"
+
     private static let cuePattern = try! NSRegularExpression(
-        pattern: #"(?i)^(.+?)(?:[\s,;:]+)(over(?:\s+and\s+out)?)[.!?]*$"#
+        pattern: #"(?i)^(.+?)(?:[\s,;:]+)(over)[.!?]*$"#
     )
 
     static func stripTrailingCue(from transcript: String) -> String? {

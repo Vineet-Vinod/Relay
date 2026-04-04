@@ -216,7 +216,11 @@ struct VoiceSessionView: View {
                         .foregroundStyle(palette.mutedColor)
 
                     if viewModel.status == .listening || viewModel.isAwaitingSendCue {
-                        Text(viewModel.isAwaitingSendCue ? "Say \"over\" or tap Send." : "Speak, then say \"over\" or tap Send.")
+                        Text(
+                            viewModel.isAwaitingSendCue
+                            ? "Say \"\(VoiceTurnEndCue.token)\" or tap Send."
+                            : "Speak, then say \"\(VoiceTurnEndCue.token)\" or tap Send."
+                        )
                             .font(.caption2)
                             .foregroundStyle(palette.mutedColor)
                     }

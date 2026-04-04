@@ -13,6 +13,7 @@ import UIKit
 @Observable
 final class VoiceSessionViewModel {
     private static let unmuteListeningResumeDelay: Duration = .milliseconds(90)
+    private static let sendCuePauseDelay: Duration = .milliseconds(700)
 
     enum Status: Equatable {
         case preparing
@@ -74,6 +75,7 @@ final class VoiceSessionViewModel {
 
     private var activeTurnTask: Task<Void, Never>?
     private var muteTransitionTask: Task<Void, Never>?
+    private var sendCuePauseTask: Task<Void, Never>?
     private var assistantSpeechBuffer = ""
     private var didReceiveAssistantDone = false
     private var shouldResumeListeningAfterPlayback = false
@@ -153,6 +155,7 @@ final class VoiceSessionViewModel {
     }
 
     private func handleRecognitionEvent(_ event: SpeechRecognizerService.RecognitionEvent) {
+        cancelSendCuePauseTask()
         switch event {
         case .cancelled:
             syncDraftUserSpeech()
@@ -226,6 +229,7 @@ final class VoiceSessionViewModel {
 
     func end() async {
         isEnding = true
+        cancelSendCuePauseTask()
         cancelMuteTransition()
         activeTurnTask?.cancel()
         activeTurnTask = nil
@@ -239,6 +243,7 @@ final class VoiceSessionViewModel {
 
     func toggleMute() {
         cancelMuteTransition()
+        cancelSendCuePauseTask()
         isMuted.toggle()
         if isMuted {
             recognizer.stopListening()
@@ -252,6 +257,7 @@ final class VoiceSessionViewModel {
     }
 
     func interrupt() {
+        cancelSendCuePauseTask()
         recognizer.stopListening()
         playback.stop()
         assistantSpeechBuffer.removeAll(keepingCapacity: true)
@@ -290,6 +296,7 @@ final class VoiceSessionViewModel {
     }
 
     private func beginListeningIfPossible(preservingDraft: Bool = false) {
+        cancelSendCuePauseTask()
         guard canListen else {
             if isMuted {
                 status = .muted
@@ -356,9 +363,11 @@ final class VoiceSessionViewModel {
     private func handlePartialTranscript(_ text: String) {
         liveDraftSpeech = text.trimmingCharacters(in: .whitespacesAndNewlines)
         syncDraftUserSpeech()
+        scheduleSendCuePauseIfNeeded()
     }
 
     private func handleFinalTranscript(_ text: String) {
+        cancelSendCuePauseTask()
         liveDraftSpeech = text.trimmingCharacters(in: .whitespacesAndNewlines)
         syncDraftUserSpeech()
 
@@ -466,6 +475,7 @@ final class VoiceSessionViewModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        cancelSendCuePauseTask()
         clearDraftUserSpeech()
         appendTranscript(kind: .user, text: trimmed)
         status = .processing
@@ -509,6 +519,7 @@ final class VoiceSessionViewModel {
     }
 
     private func clearDraftUserSpeech() {
+        cancelSendCuePauseTask()
         committedDraftSpeech = ""
         liveDraftSpeech = ""
         draftUserSpeech = ""
@@ -532,6 +543,36 @@ final class VoiceSessionViewModel {
         case (false, false):
             return "\(trimmedLeading) \(trimmedTrailing)"
         }
+    }
+
+    private func scheduleSendCuePauseIfNeeded() {
+        guard VoiceTurnEndCue.stripTrailingCue(from: currentDraftUserSpeech) != nil else {
+            cancelSendCuePauseTask()
+            return
+        }
+
+        sendCuePauseTask?.cancel()
+        sendCuePauseTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.sendCuePauseDelay)
+            } catch {
+                return
+            }
+
+            await MainActor.run {
+                guard let self else { return }
+                guard !self.isMuted, !self.isEnding else { return }
+                guard self.activeTurnTask == nil else { return }
+                guard self.recognizer.listening else { return }
+                guard VoiceTurnEndCue.stripTrailingCue(from: self.currentDraftUserSpeech) != nil else { return }
+                self.recognizer.finishListening()
+            }
+        }
+    }
+
+    private func cancelSendCuePauseTask() {
+        sendCuePauseTask?.cancel()
+        sendCuePauseTask = nil
     }
 
     private func queueSpeechIfNeeded(force: Bool) {
