@@ -69,6 +69,10 @@ final class VoiceSessionViewModel {
         configuration.host.name
     }
 
+    var assistant: VoiceAssistant {
+        configuration.assistant
+    }
+
     var subtitle: String {
         "\(configuration.host.username)@\(configuration.host.hostname)"
     }
@@ -78,11 +82,15 @@ final class VoiceSessionViewModel {
     }
 
     var isMuted: Bool {
-        isUserMuted || isWaitingForAssistantTurnToFinish
+        isUserMuted
     }
 
     var isUserMutedExplicitly: Bool {
         isUserMuted
+    }
+
+    private var isInputSuppressed: Bool {
+        isUserMuted || isWaitingForAssistantTurnToFinish
     }
 
     var hasDraftUserSpeech: Bool {
@@ -94,7 +102,7 @@ final class VoiceSessionViewModel {
     }
 
     var isAwaitingSendCue: Bool {
-        hasDraftUserSpeech && !isMuted && activeTurnTask == nil && !isEnding
+        hasDraftUserSpeech && !isInputSuppressed && activeTurnTask == nil && !isEnding
     }
 
     var shouldShowPromptComposer: Bool {
@@ -106,7 +114,7 @@ final class VoiceSessionViewModel {
         status != .ended
     }
 
-    private let bridgeClient: CodexBridgeClient
+    private let bridgeClient: any VoiceAssistantBridgeClient
     private let recognizer: SpeechRecognizerService
     private let playback: SpeechPlaybackService
     private let audioSession: VoiceAudioSessionCoordinator
@@ -128,7 +136,7 @@ final class VoiceSessionViewModel {
 
     init(
         configuration: VoiceSessionConfiguration,
-        bridgeClient: CodexBridgeClient? = nil
+        bridgeClient: (any VoiceAssistantBridgeClient)? = nil
     ) {
         let recognizer = SpeechRecognizerService()
         let playback = SpeechPlaybackService()
@@ -137,7 +145,10 @@ final class VoiceSessionViewModel {
 
         self.configuration = configuration
         self.resolvedWorkspacePath = configuration.workspacePath
-        self.bridgeClient = bridgeClient ?? CodexBridgeClient(host: configuration.host)
+        self.bridgeClient = bridgeClient ?? VoiceAssistantBridgeFactory.makeBridge(
+            for: configuration.assistant,
+            host: configuration.host
+        )
         self.recognizer = recognizer
         self.playback = playback
         self.audioSession = audioSession
@@ -157,11 +168,7 @@ final class VoiceSessionViewModel {
         self.recognizer.onError = { [weak self] message in
             self?.latestErrorMessage = message
             self?.appendTranscript(kind: .system, text: message)
-            if self?.isMuted == true {
-                self?.status = .muted
-            } else {
-                self?.status = .ready
-            }
+            self?.status = self?.currentStatusForSessionPhase() ?? .ready
         }
 
         self.playback.onDidStartSpeaking = { [weak self] in
@@ -185,10 +192,8 @@ final class VoiceSessionViewModel {
                 self.completeAssistantTurn()
             } else if self.activeTurnTask != nil {
                 self.status = .processing
-            } else if self.isMuted {
-                self.status = .muted
             } else {
-                self.status = .ready
+                self.status = self.currentStatusForSessionPhase()
             }
         }
 
@@ -210,7 +215,7 @@ final class VoiceSessionViewModel {
             Task { @MainActor [weak self] in
                 await Task.yield()
                 guard let self else { return }
-                if !self.isMuted && !self.isEnding && self.activeTurnTask == nil && !self.playback.isSpeakingOrQueued {
+                if !self.isInputSuppressed && !self.isEnding && self.activeTurnTask == nil && !self.playback.isSpeakingOrQueued {
                     self.beginListeningIfPossible(preservingDraft: self.hasDraftUserSpeech)
                 }
             }
@@ -228,12 +233,17 @@ final class VoiceSessionViewModel {
     }
 
     var canListen: Bool {
-        isPrepared && !isMuted && activeTurnTask == nil && !playback.isSpeakingOrQueued && !isEnding && !isManualEntryActive
+        isPrepared &&
+        !isInputSuppressed &&
+        activeTurnTask == nil &&
+        !playback.isSpeakingOrQueued &&
+        !isEnding &&
+        !isManualEntryActive
     }
 
     var canSendCurrentTurn: Bool {
         activeTurnTask == nil &&
-        !isMuted &&
+        !isWaitingForAssistantTurnToFinish &&
         !isEnding &&
         hasDraftUserSpeech
     }
@@ -434,8 +444,8 @@ final class VoiceSessionViewModel {
         guard canListen else {
             if isMuted {
                 status = .muted
-            } else if isPrepared && activeTurnTask == nil {
-                status = .ready
+            } else {
+                status = currentStatusForSessionPhase()
             }
             return
         }
@@ -475,6 +485,10 @@ final class VoiceSessionViewModel {
             return .processing
         }
 
+        if isWaitingForAssistantTurnToFinish {
+            return .processing
+        }
+
         if isMuted {
             return .muted
         }
@@ -508,7 +522,21 @@ final class VoiceSessionViewModel {
     private func completeAssistantTurn() {
         shouldCompleteTurnAfterPlayback = false
         setWaitingForAssistantTurn(false)
-        setUserMuted(true)
+
+        guard !isEnding else { return }
+        guard !isFailedStatus else { return }
+
+        if isMuted {
+            status = .muted
+            return
+        }
+
+        if isManualEntryActive {
+            status = .ready
+            return
+        }
+
+        beginListeningIfPossible(preservingDraft: hasDraftUserSpeech)
     }
 
     private var isFailedStatus: Bool {
@@ -546,7 +574,7 @@ final class VoiceSessionViewModel {
         beginListeningIfPossible(preservingDraft: true)
     }
 
-    private func handleBridgeEvent(_ event: CodexBridgeEvent) {
+    private func handleBridgeEvent(_ event: VoiceAssistantBridgeEvent) {
         switch event {
         case .sessionReady(let sessionID, let cwd):
             self.sessionID = sessionID ?? self.sessionID
@@ -736,7 +764,7 @@ final class VoiceSessionViewModel {
 
             await MainActor.run {
                 guard let self else { return }
-                guard !self.isMuted, !self.isEnding else { return }
+                guard !self.isInputSuppressed, !self.isEnding else { return }
                 guard self.activeTurnTask == nil else { return }
                 guard self.recognizer.listening else { return }
                 guard VoiceTurnEndCue.stripTrailingCue(from: self.currentDraftUserSpeech) != nil else { return }
@@ -922,15 +950,7 @@ final class VoiceSessionViewModel {
         controlSoundPlayer.stop()
         deactivateAudioSessionIfNeeded()
 
-        if activeTurnTask != nil {
-            status = .processing
-        } else if isMuted {
-            status = .muted
-        } else if isPrepared {
-            status = .ready
-        } else {
-            status = .preparing
-        }
+        status = currentStatusForSessionPhase()
     }
 
     private func activateAudioSessionIfNeeded() throws {

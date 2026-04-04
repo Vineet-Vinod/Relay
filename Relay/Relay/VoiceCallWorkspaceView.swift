@@ -135,9 +135,9 @@ struct VoiceCallWorkspaceView: View {
         case 0:
             return "No active calls"
         case 1:
-            return "1 active Codex call"
+            return "1 active voice call"
         default:
-            return "\(callManager.calls.count) active Codex calls"
+            return "\(callManager.calls.count) active voice calls"
         }
     }
 
@@ -167,6 +167,8 @@ private struct VoiceCallTabChip: View {
                             .foregroundStyle(palette.textColor)
                             .lineLimit(1)
 
+                        assistantBadge
+
                         Spacer(minLength: 0)
 
                         if session.viewModel.pendingNarrationCount > 0 {
@@ -193,7 +195,7 @@ private struct VoiceCallTabChip: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(session.viewModel.title), \(session.viewModel.subtitle)")
+            .accessibilityLabel("\(session.viewModel.title), \(session.viewModel.assistant.displayName), \(session.viewModel.subtitle)")
             .accessibilityValue("\(session.viewModel.status.title), \(session.viewModel.resolvedWorkspacePath)")
 
             Button(action: onEnd) {
@@ -235,6 +237,18 @@ private struct VoiceCallTabChip: View {
             .background(
                 Capsule()
                     .fill(palette.accentColor.opacity(0.16))
+            )
+    }
+
+    private var assistantBadge: some View {
+        Text(session.viewModel.assistant.displayName)
+            .font(TerminalFontRegistry.terminalSwiftUIFont(size: 9, bold: true))
+            .foregroundStyle(palette.accentColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(palette.accentColor.opacity(0.14))
             )
     }
 
@@ -338,14 +352,16 @@ private struct VoiceNewCallPickerView: View {
             VoiceWorkspacePickerView(
                 host: draft.host,
                 initialWorkspacePath: draft.initialWorkspacePath,
+                initialAssistant: .codex,
                 supportsSavingDefault: provider.supportsManualHostManagement && draft.savedDevice != nil,
                 onCancel: {
                     workspaceDraft = nil
                 },
-                onStart: { workspacePath, saveDefault in
+                onStart: { assistant, workspacePath, saveDefault in
                     Task {
                         await startCall(
                             from: draft,
+                            assistant: assistant,
                             workspacePath: workspacePath,
                             persistAsDefault: saveDefault
                         )
@@ -523,6 +539,7 @@ private struct VoiceNewCallPickerView: View {
 
     private func startCall(
         from draft: VoiceCallLaunchDraft,
+        assistant: VoiceAssistant,
         workspacePath: String,
         persistAsDefault: Bool
     ) async {
@@ -545,7 +562,8 @@ private struct VoiceNewCallPickerView: View {
         callManager.startCall(
             configuration: VoiceSessionConfiguration(
                 host: host,
-                workspacePath: trimmedWorkspacePath
+                workspacePath: trimmedWorkspacePath,
+                assistant: assistant
             )
         )
         onStarted()

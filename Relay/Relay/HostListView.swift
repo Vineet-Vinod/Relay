@@ -64,14 +64,16 @@ struct HostListView: View {
             VoiceWorkspacePickerView(
                 host: draft.host,
                 initialWorkspacePath: draft.initialWorkspacePath,
+                initialAssistant: .codex,
                 supportsSavingDefault: provider.supportsManualHostManagement && draft.savedDevice != nil,
                 onCancel: {
                     voiceWorkspaceDraft = nil
                 },
-                onStart: { workspacePath, saveDefault in
+                onStart: { assistant, workspacePath, saveDefault in
                     Task {
                         await startVoiceSession(
                             from: draft,
+                            assistant: assistant,
                             workspacePath: workspacePath,
                             persistAsDefault: saveDefault
                         )
@@ -105,9 +107,9 @@ struct HostListView: View {
                         await resolveEndpoint(for: peer, sessionKind: .terminal)
                     }
                 },
-                onTalkToCodex: {
+                onStartCall: {
                     Task {
-                        await resolveEndpoint(for: peer, sessionKind: .voiceCodex)
+                        await resolveEndpoint(for: peer, sessionKind: .voice)
                     }
                 }
             )
@@ -453,7 +455,7 @@ struct HostListView: View {
         switch sessionKind {
         case .terminal:
             destinationHost = host
-        case .voiceCodex:
+        case .voice:
             voiceWorkspaceDraft = VoiceWorkspaceDraft(
                 host: host,
                 initialWorkspacePath: savedDevice?.defaultCodexPath ?? host.defaultCodexPath ?? "",
@@ -464,6 +466,7 @@ struct HostListView: View {
 
     private func startVoiceSession(
         from draft: VoiceWorkspaceDraft,
+        assistant: VoiceAssistant,
         workspacePath: String,
         persistAsDefault: Bool
     ) async {
@@ -488,7 +491,8 @@ struct HostListView: View {
         voiceCallManager.startCall(
             configuration: VoiceSessionConfiguration(
                 host: host,
-                workspacePath: trimmedWorkspacePath
+                workspacePath: trimmedWorkspacePath,
+                assistant: assistant
             )
         )
     }
@@ -509,7 +513,7 @@ private struct DeviceDetailView: View {
     let isConnecting: Bool
     let onEdit: () -> Void
     let onConnect: () -> Void
-    let onTalkToCodex: () -> Void
+    let onStartCall: () -> Void
 
     var body: some View {
         List {
@@ -549,9 +553,9 @@ private struct DeviceDetailView: View {
                 .disabled(!peer.isOnline || isConnecting)
 
                 Button {
-                    onTalkToCodex()
+                    onStartCall()
                 } label: {
-                    Label("Talk to Codex", systemImage: "waveform.and.mic")
+                    Label("Start Voice Call", systemImage: "waveform.and.mic")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -698,7 +702,7 @@ private struct AddDeviceSheet: View {
                     focusedField = .workspace
                 }
 
-                hostField(title: "Codex Workspace (Optional)", prompt: "~/Projects/Relay", text: $defaultCodexPath, field: .workspace, submitLabel: .next, isTechnical: true) {
+                hostField(title: "Default Workspace (Optional)", prompt: "~/Projects/Relay", text: $defaultCodexPath, field: .workspace, submitLabel: .next, isTechnical: true) {
                     focusedField = .name
                 }
 

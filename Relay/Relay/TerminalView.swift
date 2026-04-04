@@ -105,7 +105,7 @@ struct TerminalView: View {
                             }
                         }
 
-                        Button("Talk to Codex") {
+                        Button("Start Voice Call") {
                             isShowingVoiceWorkspacePicker = true
                         }
 
@@ -179,11 +179,12 @@ struct TerminalView: View {
             VoiceWorkspacePickerView(
                 host: viewModel.host,
                 initialWorkspacePath: viewModel.host.defaultCodexPath ?? "",
+                initialAssistant: .codex,
                 supportsSavingDefault: false,
                 onCancel: {
                     isShowingVoiceWorkspacePicker = false
                 },
-                onStart: { workspacePath, _ in
+                onStart: { assistant, workspacePath, _ in
                     var host = viewModel.host
                     let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
                     host.defaultCodexPath = trimmedWorkspacePath
@@ -191,7 +192,8 @@ struct TerminalView: View {
                     voiceCallManager.startCall(
                         configuration: VoiceSessionConfiguration(
                             host: host,
-                            workspacePath: trimmedWorkspacePath
+                            workspacePath: trimmedWorkspacePath,
+                            assistant: assistant
                         )
                     )
                 }

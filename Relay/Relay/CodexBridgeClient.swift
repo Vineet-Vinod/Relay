@@ -10,18 +10,10 @@ import NIOCore
 import NIOSSH
 import NIOTransportServices
 
-enum CodexBridgeEvent: Sendable {
-    case sessionReady(sessionID: String?, cwd: String?)
-    case cwdResolved(String)
-    case processStarted(Int32)
-    case assistantDelta(String)
-    case assistantDone
-    case toolStatus(String)
-    case error(message: String, recoverable: Bool)
-}
-
 @MainActor
-final class CodexBridgeClient {
+final class CodexBridgeClient: VoiceAssistantBridgeClient {
+    let assistant: VoiceAssistant = .codex
+
     private let host: Host
     private let credentials: SSHCredentialStore
 
@@ -56,7 +48,7 @@ final class CodexBridgeClient {
     func sendTurn(
         _ prompt: String,
         workspacePath: String,
-        onEvent: @escaping @MainActor (CodexBridgeEvent) -> Void
+        onEvent: @escaping @MainActor (VoiceAssistantBridgeEvent) -> Void
     ) async throws {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
@@ -74,7 +66,7 @@ final class CodexBridgeClient {
         let stderrBuffer = BridgeLineBuffer()
         isInterruptingTurn = false
 
-        let emit: @Sendable (CodexBridgeEvent) -> Void = { event in
+        let emit: @Sendable (VoiceAssistantBridgeEvent) -> Void = { event in
             Task { @MainActor in
                 onEvent(event)
             }
@@ -250,7 +242,7 @@ final class CodexBridgeClient {
     }
 
     nonisolated
-    private static func parseBridgeEvent(from line: String) -> CodexBridgeEvent? {
+    private static func parseBridgeEvent(from line: String) -> VoiceAssistantBridgeEvent? {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else {
@@ -659,7 +651,7 @@ enum CodexBridgeClientError: LocalizedError {
     }
 }
 
-private struct BridgeSSHCommandResult: Sendable {
+struct BridgeSSHCommandResult: Sendable {
     let stdout: String
     let stderr: String
     let exitStatus: Int32
@@ -676,7 +668,7 @@ private enum BridgeSSHAuthentication {
     case privateKey(NIOSSHPrivateKey)
 }
 
-private enum BridgeSSHCommandExecutor {
+enum BridgeSSHCommandExecutor {
     static func runCommand(
         to host: Host,
         credentials: SSHCredentialStore,
@@ -870,7 +862,7 @@ private final class BridgeSSHStreamingResultBox: @unchecked Sendable {
     }
 }
 
-private final class BridgeLineBuffer: @unchecked Sendable {
+final class BridgeLineBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = Data()
 
@@ -911,7 +903,7 @@ private final class BridgeLineBuffer: @unchecked Sendable {
     }
 }
 
-private final class BridgeSSHStreamingCommandSession: @unchecked Sendable {
+final class BridgeSSHStreamingCommandSession: @unchecked Sendable {
     private let group: NIOTSEventLoopGroup
     private let rootChannel: Channel
     private let commandChannel: Channel

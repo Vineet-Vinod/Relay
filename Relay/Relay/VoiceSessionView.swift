@@ -151,12 +151,19 @@ struct VoiceSessionView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: RelayTheme.Spacing.tight) {
                     ForEach(viewModel.transcript) { item in
-                        VoiceTranscriptRow(item: item, palette: palette)
+                        VoiceTranscriptRow(
+                            item: item,
+                            assistant: viewModel.assistant,
+                            palette: palette
+                        )
                             .id(item.id)
                     }
 
                     if viewModel.showsConversationActivity {
-                        VoiceTranscriptActivityRow(palette: palette)
+                        VoiceTranscriptActivityRow(
+                            assistant: viewModel.assistant,
+                            palette: palette
+                        )
                     }
 
                     Color.clear
@@ -407,7 +414,7 @@ private struct VoiceSessionSettingsSheet: View {
                             .font(.headline)
                             .foregroundStyle(palette.textColor)
 
-                        Text("Adjust how quickly Codex speaks during the call.")
+                        Text("Adjust how quickly the assistant speaks during the call.")
                             .font(.subheadline)
                             .foregroundStyle(palette.mutedColor)
                     }
@@ -478,18 +485,20 @@ struct VoiceWorkspacePickerView: View {
     let host: Host
     let supportsSavingDefault: Bool
     let onCancel: () -> Void
-    let onStart: (String, Bool) -> Void
+    let onStart: (VoiceAssistant, String, Bool) -> Void
 
     @State private var workspacePath: String
     @State private var saveAsDefault: Bool
+    @State private var selectedAssistant: VoiceAssistant
     @FocusState private var isWorkspaceFocused: Bool
 
     init(
         host: Host,
         initialWorkspacePath: String,
+        initialAssistant: VoiceAssistant = .codex,
         supportsSavingDefault: Bool,
         onCancel: @escaping () -> Void,
-        onStart: @escaping (String, Bool) -> Void
+        onStart: @escaping (VoiceAssistant, String, Bool) -> Void
     ) {
         self.host = host
         self.supportsSavingDefault = supportsSavingDefault
@@ -497,6 +506,7 @@ struct VoiceWorkspacePickerView: View {
         self.onStart = onStart
         _workspacePath = State(initialValue: initialWorkspacePath)
         _saveAsDefault = State(initialValue: supportsSavingDefault && !initialWorkspacePath.isEmpty)
+        _selectedAssistant = State(initialValue: initialAssistant)
     }
 
     var body: some View {
@@ -504,16 +514,20 @@ struct VoiceWorkspacePickerView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: RelayTheme.Spacing.section) {
                     introCard
+                    sessionCard
                     workspaceCard
                     if supportsSavingDefault {
                         defaultCard
                     }
                 }
-                .padding(20)
-                .padding(.bottom, 120)
+                .frame(maxWidth: 460)
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 140)
+                .frame(maxWidth: .infinity)
             }
             .background(RelayTheme.surfaceBase.ignoresSafeArea())
-            .navigationTitle("Codex Workspace")
+            .navigationTitle("Call Workspace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -528,44 +542,110 @@ struct VoiceWorkspacePickerView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: RelayTheme.Spacing.tight) {
-                    Button("Start Voice Session") {
-                        onStart(trimmedWorkspacePath, saveAsDefault && supportsSavingDefault)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(RelayTheme.accent)
-                    .disabled(trimmedWorkspacePath.isEmpty)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
-                .background(Color(uiColor: .systemBackground))
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(RelayTheme.surfaceStroke)
-                        .frame(height: 1)
-                }
+                actionBar
             }
         }
     }
 
     private var introCard: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
-            Text("Talk to Codex on \(host.name)")
-                .font(.title3.weight(.semibold))
+        VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
+            HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(RelayTheme.accent.opacity(0.12))
 
-            Text("Choose the directory Codex should operate in before Relay opens the voice session.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "waveform.and.mic")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(RelayTheme.accent)
+                }
+                .frame(width: 46, height: 46)
+
+                VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
+                    Text("Start a Voice Call")
+                        .font(.title3.weight(.semibold))
+
+                    Text("Choose an assistant and remote workspace before Relay opens the call.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(spacing: RelayTheme.Spacing.tight) {
+                Label(host.name, systemImage: "desktopcomputer")
+                    .lineLimit(1)
+
+                Label("Voice", systemImage: "waveform")
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .relayAppCard()
+    }
+
+    private var sessionCard: some View {
+        VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
+            Text("Call Details")
+                .font(.headline)
+
+            VoiceWorkspaceSummaryRow(
+                icon: "desktopcomputer",
+                title: "Host",
+                value: host.name,
+                detail: "\(host.username)@\(host.hostname):\(host.port)",
+                isTechnicalDetail: true
+            )
+
+            VoiceWorkspaceSummaryRow(
+                icon: selectedAssistant.systemImage,
+                title: "Assistant",
+                value: selectedAssistant.displayName,
+                detail: selectedAssistant.isExperimental ? "Experimental remote Claude CLI path." : "Uses the Codex CLI on the remote host.",
+                isTechnicalDetail: false
+            )
+
+            VoiceWorkspaceSummaryRow(
+                icon: "waveform.and.mic",
+                title: "Mode",
+                value: selectedAssistant.callLabel,
+                detail: "Relay validates the workspace first, then opens the call.",
+                isTechnicalDetail: false
+            )
         }
         .relayAppCard()
     }
 
     private var workspaceCard: some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
-            Text("Workspace")
-                .font(.headline)
+            VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
+                Text("Assistant")
+                    .font(.headline)
+
+                Picker("Assistant", selection: $selectedAssistant) {
+                    ForEach(VoiceAssistant.allCases) { assistant in
+                        Text(assistant.displayName)
+                            .tag(assistant)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if selectedAssistant.isExperimental {
+                    Text("Claude call support is experimental and depends on the Claude CLI being available on the remote host.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
+                Text("Workspace")
+                    .font(.headline)
+
+                Text("Use the directory where \(selectedAssistant.displayName) should read and make changes on the remote host.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
                 Text("Remote Path")
@@ -580,12 +660,32 @@ struct VoiceWorkspacePickerView: View {
                     .submitLabel(.go)
                     .onSubmit {
                         guard !trimmedWorkspacePath.isEmpty else { return }
-                        onStart(trimmedWorkspacePath, saveAsDefault && supportsSavingDefault)
+                        onStart(selectedAssistant, trimmedWorkspacePath, saveAsDefault && supportsSavingDefault)
                     }
                     .relayAppFieldBackground(isFocused: isWorkspaceFocused, isTechnical: true)
             }
 
-            Text("Relay validates this directory on the remote host before starting the Codex voice session.")
+            HStack(alignment: .top, spacing: RelayTheme.Spacing.tight) {
+                Image(systemName: "checkmark.shield")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(RelayTheme.accent)
+                    .frame(width: 16, height: 16)
+                    .padding(.top, 1)
+
+                Text("Relay checks that this directory is reachable on the remote host before the call starts.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .relayAppCard()
+    }
+
+    private var defaultCard: some View {
+        VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
+            Toggle("Save as this device's default workspace", isOn: $saveAsDefault)
+
+            Text("Relay will prefill this path the next time you start a call on \(host.name).")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -593,11 +693,64 @@ struct VoiceWorkspacePickerView: View {
         .relayAppCard()
     }
 
-    private var defaultCard: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-            Toggle("Save as this device's default Codex workspace", isOn: $saveAsDefault)
+    private var actionBar: some View {
+        VStack {
+            VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
+                Text(actionBarMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    onStart(selectedAssistant, trimmedWorkspacePath, saveAsDefault && supportsSavingDefault)
+                } label: {
+                    HStack(spacing: RelayTheme.Spacing.compact) {
+                        Image(systemName: "waveform.and.mic")
+                            .font(.headline.weight(.semibold))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Start Call")
+                                .font(.headline.weight(.semibold))
+
+                            Text(host.name)
+                                .font(.caption.weight(.medium))
+                                .opacity(0.9)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: RelayTheme.Spacing.tight)
+
+                        Image(systemName: "arrow.right")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(RelayTheme.accent)
+                .controlSize(.large)
+                .disabled(trimmedWorkspacePath.isEmpty)
+            }
+            .frame(maxWidth: 460)
+            .frame(maxWidth: .infinity)
         }
-        .relayAppCard()
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 20)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(RelayTheme.surfaceStroke)
+                .frame(height: 1)
+        }
+    }
+
+    private var actionBarMessage: String {
+        guard !trimmedWorkspacePath.isEmpty else {
+            return "Enter a remote workspace path to enable the call."
+        }
+
+        return "Relay will validate \(trimmedWorkspacePath) on \(host.name) before opening \(selectedAssistant.callLabel)."
     }
 
     private var trimmedWorkspacePath: String {
@@ -605,10 +758,53 @@ struct VoiceWorkspacePickerView: View {
     }
 }
 
+private struct VoiceWorkspaceSummaryRow: View {
+    let icon: String
+    let title: String
+    let value: String
+    let detail: String
+    let isTechnicalDetail: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(RelayTheme.accent.opacity(0.10))
+
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(RelayTheme.accent)
+            }
+            .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(detail)
+                    .font(
+                        isTechnicalDetail
+                        ? TerminalFontRegistry.terminalSwiftUIFont(size: 12)
+                        : .footnote
+                    )
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 private struct VoiceTranscriptRow: View {
     private static let messageCardMaxWidth: CGFloat = 540
 
     let item: VoiceTranscriptItem
+    let assistant: VoiceAssistant
     let palette: RelayTerminalPalette
 
     var body: some View {
@@ -627,7 +823,7 @@ private struct VoiceTranscriptRow: View {
         case .user:
             return "You"
         case .assistant:
-            return "Codex"
+            return assistant.displayName
         case .toolStatus:
             return "Relay"
         case .system:
@@ -729,7 +925,7 @@ private struct VoiceTranscriptRow: View {
         case .user:
             return "person.fill"
         case .assistant:
-            return "chevron.left.forwardslash.chevron.right"
+            return assistant.systemImage
         case .toolStatus:
             return "gearshape.fill"
         case .system:
@@ -791,6 +987,7 @@ private struct VoiceTranscriptRow: View {
 }
 
 private struct VoiceTranscriptActivityRow: View {
+    let assistant: VoiceAssistant
     let palette: RelayTerminalPalette
 
     var body: some View {
@@ -807,7 +1004,7 @@ private struct VoiceTranscriptActivityRow: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(palette.subtleColor.opacity(0.65), lineWidth: 1)
                 )
-                .accessibilityLabel("Codex is working")
+                .accessibilityLabel("\(assistant.displayName) is working")
 
             Spacer(minLength: 0)
         }

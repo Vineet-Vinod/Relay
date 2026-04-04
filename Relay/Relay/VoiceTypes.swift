@@ -7,20 +7,27 @@
 
 import Foundation
 
-enum SessionKind: String, Hashable, Sendable {
+enum SessionKind: Hashable, Sendable {
     case terminal
-    case voiceCodex
+    case voice
 }
 
 struct VoiceSessionConfiguration: Identifiable, Hashable, Sendable {
     let id: UUID
     var host: Host
     var workspacePath: String
+    var assistant: VoiceAssistant
 
-    init(id: UUID = UUID(), host: Host, workspacePath: String) {
+    init(
+        id: UUID = UUID(),
+        host: Host,
+        workspacePath: String,
+        assistant: VoiceAssistant = .codex
+    ) {
         self.id = id
         self.host = host
         self.workspacePath = workspacePath
+        self.assistant = assistant
     }
 }
 
