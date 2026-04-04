@@ -9,25 +9,50 @@ import AVFoundation
 
 @MainActor
 final class VoiceControlSoundPlayer: NSObject {
-    private static let cuePlaybackVolume: Float = 0.62
+    private static let cuePlaybackVolume: Float = 0.46
+
+    fileprivate struct CueSegment {
+        let startFrequency: Double
+        let endFrequency: Double
+        let duration: Double
+        let gain: Double
+
+        static func tone(_ startFrequency: Double, _ endFrequency: Double, duration: Double, gain: Double) -> CueSegment {
+            CueSegment(
+                startFrequency: startFrequency,
+                endFrequency: endFrequency,
+                duration: duration,
+                gain: gain
+            )
+        }
+
+        static func silence(duration: Double) -> CueSegment {
+            CueSegment(
+                startFrequency: 0,
+                endFrequency: 0,
+                duration: duration,
+                gain: 0
+            )
+        }
+    }
 
     enum Cue {
         case mute
         case unmute
 
-        fileprivate var segments: [(frequency: Double, duration: Double)] {
+        fileprivate var segments: [CueSegment] {
             switch self {
             case .mute:
                 return [
-                    (880, 0.035),
-                    (0, 0.012),
-                    (698, 0.05),
+                    .tone(622, 587, duration: 0.05, gain: 0.72),
+                    .silence(duration: 0.014),
+                    .tone(523, 466, duration: 0.09, gain: 0.58),
                 ]
             case .unmute:
                 return [
-                    (698, 0.035),
-                    (0, 0.012),
-                    (880, 0.05),
+                    .tone(466, 523, duration: 0.052, gain: 0.62),
+                    .silence(duration: 0.014),
+                    .tone(587, 659, duration: 0.095, gain: 0.82),
                 ]
             }
         }
@@ -94,12 +119,14 @@ final class VoiceControlSoundPlayer: NSObject {
 
     private static func makeWAVData(for cue: Cue) -> Data {
         let sampleRate = 44_100.0
-        let amplitude = 0.34
-        let attackRatio = 0.16
-        let releaseRatio = 0.22
+        let amplitude = 0.24
+        let attackRatio = 0.22
+        let releaseRatio = 0.34
 
         var samples: [Int16] = []
-        var phase = 0.0
+        var fundamentalPhase = 0.0
+        var secondHarmonicPhase = 0.0
+        var thirdHarmonicPhase = 0.0
 
         for segment in cue.segments {
             let frameCount = max(Int(sampleRate * segment.duration), 1)
@@ -110,13 +137,24 @@ final class VoiceControlSoundPlayer: NSObject {
                 let attack = min(progress / attackRatio, 1)
                 let release = min((1 - progress) / releaseRatio, 1)
                 let envelope = min(attack, release)
+                let easedProgress = easeInOut(progress)
+                let frequency = segment.startFrequency + ((segment.endFrequency - segment.startFrequency) * easedProgress)
 
                 let sampleValue: Double
-                if segment.frequency == 0 {
+                if frequency == 0 || segment.gain == 0 {
                     sampleValue = 0
                 } else {
-                    phase += (2 * .pi * segment.frequency) / sampleRate
-                    sampleValue = sin(phase) * amplitude * envelope
+                    let phaseStep = (2 * .pi * frequency) / sampleRate
+                    fundamentalPhase += phaseStep
+                    secondHarmonicPhase += phaseStep * 2
+                    thirdHarmonicPhase += phaseStep * 3
+
+                    let tone =
+                        (sin(fundamentalPhase) * 0.78) +
+                        (sin(secondHarmonicPhase) * 0.16) +
+                        (sin(thirdHarmonicPhase) * 0.06)
+
+                    sampleValue = tone * amplitude * envelope * segment.gain
                 }
 
                 let clamped = max(-1.0, min(1.0, sampleValue))
@@ -130,6 +168,10 @@ final class VoiceControlSoundPlayer: NSObject {
             channelCount: 1,
             bitsPerSample: 16
         )
+    }
+
+    private static func easeInOut(_ value: Double) -> Double {
+        0.5 - (cos(value * .pi) / 2)
     }
 
     private static func wavData(

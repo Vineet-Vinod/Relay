@@ -57,6 +57,7 @@ final class VoiceSessionViewModel {
     var latestErrorMessage: String?
     var isPrepared = false
     var isEnding = false
+    var isManualEntryActive = false
     var availableAudioRoutes: [VoiceAudioSessionCoordinator.AudioRouteOption] = []
     var selectedAudioRoute: VoiceAudioSessionCoordinator.AudioRouteOption = .receiver
 
@@ -88,6 +89,7 @@ final class VoiceSessionViewModel {
     private var assistantSpeechBuffer = ""
     private var didReceiveAssistantDone = false
     private var shouldResumeListeningAfterPlayback = false
+    private var typedDraftSpeech = ""
     private var committedDraftSpeech = ""
     private var liveDraftSpeech = ""
     private var isUserMuted = false
@@ -205,7 +207,7 @@ final class VoiceSessionViewModel {
     }
 
     var canListen: Bool {
-        isPrepared && !isMuted && activeTurnTask == nil && !playback.isSpeakingOrQueued && !isEnding
+        isPrepared && !isMuted && activeTurnTask == nil && !playback.isSpeakingOrQueued && !isEnding && !isManualEntryActive
     }
 
     var canSendCurrentTurn: Bool {
@@ -315,6 +317,65 @@ final class VoiceSessionViewModel {
 
     func updateSpeechVolume(_ volume: Double) {
         playback.updateVolume(Float(RelayVoicePreference.clampOutputVolume(volume)))
+    }
+
+    func beginManualEntry() {
+        guard !isEnding else { return }
+        guard !isManualEntryActive else { return }
+
+        isManualEntryActive = true
+        cancelSendCuePauseTask()
+        recognizer.stopListening()
+
+        typedDraftSpeech = currentDraftUserSpeech
+        committedDraftSpeech = ""
+        liveDraftSpeech = ""
+        syncDraftUserSpeech()
+
+        if playback.isSpeakingOrQueued {
+            status = .speaking
+        } else if activeTurnTask != nil {
+            status = .processing
+        } else if isMuted {
+            status = .muted
+        } else if isPrepared {
+            status = .ready
+        }
+    }
+
+    func endManualEntry() {
+        guard isManualEntryActive else { return }
+
+        isManualEntryActive = false
+        typedDraftSpeech = draftUserSpeech.trimmingCharacters(in: .whitespacesAndNewlines)
+        syncDraftUserSpeech()
+
+        guard !isEnding else { return }
+        guard !playback.isSpeakingOrQueued else {
+            status = .speaking
+            return
+        }
+        guard activeTurnTask == nil else {
+            status = .processing
+            return
+        }
+        guard !isMuted else {
+            status = .muted
+            return
+        }
+        guard isPrepared else {
+            status = .preparing
+            return
+        }
+
+        beginListeningIfPossible(preservingDraft: true)
+    }
+
+    func updateManualDraft(_ text: String) {
+        typedDraftSpeech = text
+        committedDraftSpeech = ""
+        liveDraftSpeech = ""
+        syncDraftUserSpeech()
     }
 
     func selectAudioRoute(_ route: VoiceAudioSessionCoordinator.AudioRouteOption) {
@@ -561,7 +622,7 @@ final class VoiceSessionViewModel {
     }
 
     private var currentDraftUserSpeech: String {
-        joinSpeechSegments(committedDraftSpeech, liveDraftSpeech)
+        joinSpeechSegments(typedDraftSpeech, joinSpeechSegments(committedDraftSpeech, liveDraftSpeech))
     }
 
     private func submitCurrentDraft() {
@@ -624,6 +685,7 @@ final class VoiceSessionViewModel {
 
     private func clearDraftUserSpeech() {
         cancelSendCuePauseTask()
+        typedDraftSpeech = ""
         committedDraftSpeech = ""
         liveDraftSpeech = ""
         draftUserSpeech = ""

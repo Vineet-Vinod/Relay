@@ -18,6 +18,7 @@ struct VoiceSessionView: View {
     @State private var isPresentingAudioRoutes = false
     @State private var isPresentingVoiceSettings = false
     @State private var viewModel: VoiceSessionViewModel
+    @FocusState private var isPromptFieldFocused: Bool
 
     init(configuration: VoiceSessionConfiguration) {
         _viewModel = State(initialValue: VoiceSessionViewModel(configuration: configuration))
@@ -75,8 +76,24 @@ struct VoiceSessionView: View {
         .onChange(of: voiceSpeechRate) { _, newValue in
             viewModel.updateSpeechRate(newValue)
         }
+        .onChange(of: isPromptFieldFocused) { _, isFocused in
+            if isFocused {
+                viewModel.beginManualEntry()
+            } else {
+                viewModel.endManualEntry()
+            }
+        }
         .onChange(of: viewModel.status) { _, _ in
             updateIdleTimer()
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+
+                Button("Done") {
+                    isPromptFieldFocused = false
+                }
+            }
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -155,43 +172,73 @@ struct VoiceSessionView: View {
                     proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard isPromptFieldFocused else { return }
+                isPromptFieldFocused = false
+            }
         }
     }
 
     private func composerPanel(palette: RelayTerminalPalette) -> some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-            Text("Live Transcript")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(palette.mutedColor)
+            HStack(alignment: .top, spacing: RelayTheme.Spacing.tight) {
+                Text(">")
+                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 15, bold: true))
+                    .foregroundStyle(isPromptFieldFocused || viewModel.status == .listening ? palette.accentColor : palette.mutedColor)
+                    .padding(.top, 3)
 
-            if viewModel.status == .listening || viewModel.isAwaitingSendCue {
-                Text("Speak naturally. Relay will keep this draft visible until you send it.")
-                    .font(.caption2)
-                    .foregroundStyle(palette.mutedColor)
+                Spacer(minLength: 0)
+
+                promptStatusChip(palette: palette)
             }
 
-            Text(viewModel.draftUserSpeech.isEmpty ? draftPlaceholder : viewModel.draftUserSpeech)
-                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 16))
-                .foregroundStyle(viewModel.draftUserSpeech.isEmpty ? palette.mutedColor : palette.textColor)
-                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            TextField("Speak or type a prompt", text: promptDraftBinding, axis: .vertical)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($isPromptFieldFocused)
+                .submitLabel(.send)
+                .lineLimit(1...6)
+                .onSubmit {
+                    guard viewModel.canSendCurrentTurn else { return }
+                    viewModel.finishCurrentTurn()
+                    isPromptFieldFocused = false
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(promptHint)
+                .font(.caption2)
+                .foregroundStyle(palette.mutedColor)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .relayTerminalFieldBackground(palette, isFocused: viewModel.status == .listening)
+        .relayTerminalFieldBackground(palette, isFocused: isPromptFieldFocused || viewModel.status == .listening)
+        .contentShape(RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous))
+        .onTapGesture {
+            isPromptFieldFocused = true
+        }
     }
 
-    private var draftPlaceholder: String {
+    private var promptDraftBinding: Binding<String> {
+        Binding(
+            get: { viewModel.draftUserSpeech },
+            set: { viewModel.updateManualDraft($0) }
+        )
+    }
+
+    private var promptHint: String {
         switch viewModel.status {
-        case .listening:
-            return "Listening for your next turn..."
-        case .muted:
-            return "Microphone is muted."
-        case .processing:
-            return "Sending your turn to Codex..."
-        case .speaking:
-            return "Codex is responding..."
-        case .preparing:
-            return "Preparing the remote bridge..."
         case .ready:
-            return "Ready."
+            return "Speak naturally or tap here to type before sending."
+        case .listening:
+            return "Listening for your next turn."
+        case .muted:
+            return "Microphone is muted. Tap here if you want to type instead."
+        case .processing:
+            return "Sending your turn to Codex."
+        case .speaking:
+            return "Codex is responding."
+        case .preparing:
+            return "Preparing the remote bridge."
         case .ended:
             return "Session ended."
         case .failed(let message):
@@ -199,13 +246,92 @@ struct VoiceSessionView: View {
         }
     }
 
+    @ViewBuilder
+    private func promptStatusChip(palette: RelayTerminalPalette) -> some View {
+        Label(promptStatusText, systemImage: promptStatusSymbol)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(promptStatusColor(palette: palette))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(promptStatusColor(palette: palette).opacity(0.14))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(promptStatusColor(palette: palette).opacity(0.24), lineWidth: 1)
+            )
+    }
+
+    private var promptStatusText: String {
+        if isPromptFieldFocused {
+            return "Type"
+        }
+
+        switch viewModel.status {
+        case .listening:
+            return "Live"
+        case .muted:
+            return "Muted"
+        case .processing:
+            return "Sending"
+        case .speaking:
+            return "Codex"
+        case .preparing:
+            return "Starting"
+        case .ended:
+            return "Ended"
+        case .failed:
+            return "Alert"
+        case .ready:
+            return "Voice"
+        }
+    }
+
+    private var promptStatusSymbol: String {
+        if isPromptFieldFocused {
+            return "keyboard"
+        }
+
+        switch viewModel.status {
+        case .listening:
+            return "waveform"
+        case .muted:
+            return "mic.slash"
+        case .processing:
+            return "arrow.up"
+        case .speaking:
+            return "speaker.wave.2"
+        case .preparing:
+            return "ellipsis"
+        case .ended:
+            return "phone.down"
+        case .failed:
+            return "exclamationmark.triangle"
+        case .ready:
+            return "mic"
+        }
+    }
+
+    private func promptStatusColor(palette: RelayTerminalPalette) -> Color {
+        if isPromptFieldFocused {
+            return palette.accentColor
+        }
+
+        switch viewModel.status {
+        case .failed:
+            return palette.warningColor
+        case .muted:
+            return palette.warningColor
+        case .ended:
+            return palette.mutedColor
+        default:
+            return palette.accentColor
+        }
+    }
+
     private func controls(palette: RelayTerminalPalette) -> some View {
         VStack(spacing: RelayTheme.Spacing.content) {
-            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                .fill(palette.subtleColor.opacity(0.9))
-                .frame(width: 44, height: 5)
-                .padding(.top, 4)
-
             LazyVGrid(columns: controlColumns, alignment: .center, spacing: 18) {
                 Button {
                     isPresentingAudioRoutes = true
@@ -243,6 +369,7 @@ struct VoiceSessionView: View {
 
                 Button {
                     viewModel.finishCurrentTurn()
+                    isPromptFieldFocused = false
                 } label: {
                     VoicePhoneControlButton(
                         title: "Send",
@@ -277,23 +404,6 @@ struct VoiceSessionView: View {
                 .accessibilityLabel("Fast forward speech")
 
                 Button {
-                    dismiss()
-                } label: {
-                    VoicePhoneControlButton(
-                        title: "End",
-                        subtitle: nil,
-                        systemImage: "phone.down.fill",
-                        palette: palette,
-                        accentColor: palette.dangerColor,
-                        isActive: true,
-                        usesSolidAccentFillWhenActive: true,
-                        isDisabled: false
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("End voice session")
-
-                Button {
                     viewModel.interrupt()
                 } label: {
                     VoicePhoneControlButton(
@@ -309,6 +419,23 @@ struct VoiceSessionView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!viewModel.canInterrupt)
+
+                Button {
+                    dismiss()
+                } label: {
+                    VoicePhoneControlButton(
+                        title: "End",
+                        subtitle: nil,
+                        systemImage: "phone.down.fill",
+                        palette: palette,
+                        accentColor: palette.dangerColor,
+                        isActive: true,
+                        usesSolidAccentFillWhenActive: true,
+                        isDisabled: false
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("End voice session")
             }
         }
         .padding(.horizontal, 20)
@@ -330,7 +457,7 @@ struct VoiceSessionView: View {
     }
 
     private func bottomTrayHeight(for availableHeight: CGFloat) -> CGFloat {
-        min(max(availableHeight * 0.27, 210), 280)
+        min(max(availableHeight * 0.30, 238), 320)
     }
 
     private func updateIdleTimer() {
@@ -742,12 +869,14 @@ private struct VoicePhoneControlButton: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(labelColor)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.72)
 
                 if let subtitle {
                     Text(subtitle)
                         .font(.caption2)
                         .foregroundStyle(palette.mutedColor)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                 }
             }
         }
