@@ -18,3 +18,6 @@ xcuserdata/
 /Server/.state/
 /Server/state/
 /Server/relay-server
+
+# MacOS
+.DS_Store

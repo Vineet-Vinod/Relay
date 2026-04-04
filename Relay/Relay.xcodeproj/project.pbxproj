@@ -58,7 +58,7 @@
 		};
 		7B1000042F90000100463020 /* RelayTunnelExtension */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Relay/RelayTunnelExtension;
+			path = RelayTunnelExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -89,7 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				3792B0C62F8148F100463020 /* Relay */,
-				7B1000042F90000100463020 /* RelayTunnelExtension */,
+				7B1000042F90000100463020 /* Relay/RelayTunnelExtension */,
 				3792B0C52F8148F100463020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,7 +108,7 @@
 /* Begin PBXLegacyTarget section */
 		7B1000082F90000100463020 /* WireGuardGoBridgeiOS */ = {
 			isa = PBXLegacyTarget;
-			buildArgumentsString = "-lc \"cd \\\"$BUILD_DIR/../../SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo\\\" && exec /usr/bin/make\"";
+			buildArgumentsString = "-lc \"\\\"$SRCROOT/scripts/build-wireguard-go-bridge.sh\\\"\"";
 			buildConfigurationList = 7B1000142F90000100463020 /* Build configuration list for PBXLegacyTarget "WireGuardGoBridgeiOS" */;
 			buildPhases = (
 			);
@@ -164,7 +164,7 @@
 				7B10000C2F90000100463020 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				7B1000042F90000100463020 /* RelayTunnelExtension */,
+				7B1000042F90000100463020 /* Relay/RelayTunnelExtension */,
 			);
 			name = RelayTunnelExtension;
 			packageProductDependencies = (
@@ -395,10 +395,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Relay/Relay.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Relay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 57935535S7;
+				DEVELOPMENT_TEAM = HVYQ5S276L;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
@@ -431,10 +431,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Relay/Relay.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Relay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 57935535S7;
+				DEVELOPMENT_TEAM = HVYQ5S276L;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
@@ -466,12 +466,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = Relay/RelayTunnelExtension/RelayTunnelExtension.entitlements;
+				CODE_SIGN_ENTITLEMENTS = RelayTunnelExtension/RelayTunnelExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 57935535S7;
+				DEVELOPMENT_TEAM = HVYQ5S276L;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Relay/RelayTunnelExtension/Info.plist;
+				INFOPLIST_FILE = RelayTunnelExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -495,12 +495,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = Relay/RelayTunnelExtension/RelayTunnelExtension.entitlements;
+				CODE_SIGN_ENTITLEMENTS = RelayTunnelExtension/RelayTunnelExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 57935535S7;
+				DEVELOPMENT_TEAM = HVYQ5S276L;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Relay/RelayTunnelExtension/Info.plist;
+				INFOPLIST_FILE = RelayTunnelExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
