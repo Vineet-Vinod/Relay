@@ -1,7 +1,6 @@
 ### Xcode ###
 ## User settings
 xcuserdata/
-<<<<<<< HEAD
 
 ### Xcode Patch ###
 *.xcodeproj/*
@@ -19,5 +18,3 @@ xcuserdata/
 /Server/.state/
 /Server/state/
 /Server/relay-server
-=======
->>>>>>> dev
