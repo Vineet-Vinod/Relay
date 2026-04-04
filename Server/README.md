@@ -39,21 +39,24 @@ From the repo root:
 
 ```bash
 cd Server
+cp .env.example .env
+# edit .env for your machine
 go build -o relay-server .
 sudo ./relay-server
 ```
 
-Optional environment variables:
+The server automatically loads `Server/.env` if it exists. Explicit shell environment variables still win over values in `.env`.
+
+Safe template to commit:
 
 ```bash
-export RELAY_HTTP_ADDR=":8080"
-export RELAY_WG_INTERFACE="wg0"
-export RELAY_WG_ADDRESS="10.0.0.1/24"
-export RELAY_WG_LISTEN_PORT="51820"
-export RELAY_PERSISTENT_KEEPALIVE="25"
-export RELAY_SERVER_ENDPOINT="YOUR_PUBLIC_IP_OR_DNS:51820"
-export RELAY_EGRESS_INTERFACE="en0"
-export RELAY_STATE_DIR="./.state"
+cp .env.example .env
+```
+
+You can also point at a different env file:
+
+```bash
+sudo RELAY_ENV_FILE=/path/to/relay.env ./relay-server
 ```
 
 If `RELAY_SERVER_ENDPOINT` is not set, the server uses the detected IPv4 address of the active default-route interface.

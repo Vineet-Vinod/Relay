@@ -43,6 +43,10 @@ type AppConfig struct {
 func main() {
 	logger := log.New(os.Stdout, "relay-server ", log.LstdFlags|log.Lmsgprefix)
 
+	if err := loadDotEnv(); err != nil {
+		logger.Fatalf("load .env: %v", err)
+	}
+
 	if os.Geteuid() != 0 {
 		logger.Fatal("run this server as root or with sudo on macOS; wg, ifconfig, sysctl, and pfctl require elevated privileges")
 	}
