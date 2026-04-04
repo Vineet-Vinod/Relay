@@ -8,3 +8,5 @@ Please keep security best practices in mind while implementing this application.
 
 For UI work, consult `docs/ui-ux-ruleset.md` before implementing or revising any user-facing surface.
 Prefer evolving the app toward that shared ruleset instead of introducing one-off styling decisions.
+
+Do not try to build the projext with `xcodebuild`, instead just check for syntax issues and build errors manually.
