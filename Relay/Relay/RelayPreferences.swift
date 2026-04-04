@@ -25,6 +25,10 @@ enum RelayDefaultsKey {
         bellBehavior,
         keepScreenAwake,
         automaticallyReconnect,
+        preferredNetworkPath,
+        relayVPNControlServerURL,
+        relayVPNPeerIdentifier,
+        relayVPNProfileRecord,
     ]
 }
 
@@ -120,6 +124,7 @@ struct RelayPreferences {
             RelayDefaultsKey.bellBehavior: RelayBellBehavior.haptic.rawValue,
             RelayDefaultsKey.keepScreenAwake: true,
             RelayDefaultsKey.automaticallyReconnect: true,
+            RelayDefaultsKey.preferredNetworkPath: RelayNetworkPath.relayVPN.rawValue,
         ])
     }
 }

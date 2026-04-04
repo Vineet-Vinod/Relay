@@ -559,11 +559,11 @@ private struct AddDeviceSheet: View {
 
     private var introCard: some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
-            Label(device == nil ? "Connect By IP Address" : "Update Device Details", systemImage: "point.3.connected.trianglepath.dotted")
+            Label(device == nil ? "Connect By Hostname Or IP" : "Update Device Details", systemImage: "point.3.connected.trianglepath.dotted")
                 .font(.title3.weight(.semibold))
 
             Text(device == nil
-                 ? "Save a device with its IP address so Relay can check whether SSH is reachable and reconnect later."
+                 ? "Save a device with its hostname or IP address so Relay can check whether SSH is reachable and reconnect later."
                  : "Change the label, address, username, or port Relay should use the next time you connect.")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -578,7 +578,7 @@ private struct AddDeviceSheet: View {
                 .font(.headline)
 
             VStack(spacing: 14) {
-                hostField(title: "IP Address", prompt: "192.168.1.24", text: $address, field: .address, submitLabel: .next, isTechnical: true) {
+                hostField(title: "Host", prompt: "10.0.0.1 or macbook.tailnet.ts.net", text: $address, field: .address, submitLabel: .next, isTechnical: true) {
                     focusedField = .username
                 }
 
@@ -603,7 +603,7 @@ private struct AddDeviceSheet: View {
             Label("Stored On Device", systemImage: "internaldrive")
                 .font(.headline)
 
-            Text("Relay stores the label, IP address, username, and port on this device so it can reconnect later. Passwords are requested only when needed and are not saved here.")
+            Text("Relay stores the label, hostname or IP address, username, and port on this device so it can reconnect later. Passwords are requested only when needed and are not saved here.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -623,7 +623,7 @@ private struct AddDeviceSheet: View {
             .tint(RelayTheme.accent)
             .disabled(parsedHost == nil)
 
-            Text("Use an IPv4 or IPv6 address that this device can reach over the network.")
+            Text("Use a hostname or IP address that this device can reach over the network.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -658,7 +658,7 @@ private struct AddDeviceSheet: View {
                 .autocorrectionDisabled()
                 .keyboardType(
                     field == .address
-                    ? .numbersAndPunctuation
+                    ? .URL
                     : field == .port
                         ? .numberPad
                         : .default
@@ -669,7 +669,7 @@ private struct AddDeviceSheet: View {
                 .relayAppFieldBackground(isFocused: focusedField == field, isTechnical: isTechnical)
 
             if field == .address, showAddressValidation {
-                Text("Enter a valid IPv4 or IPv6 address.")
+                Text("Enter a valid hostname, IPv4 address, or IPv6 address.")
                     .font(.footnote)
                     .foregroundStyle(RelayTheme.danger)
             } else if field == .port, showPortValidation {
@@ -682,7 +682,7 @@ private struct AddDeviceSheet: View {
 
     private var showAddressValidation: Bool {
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmedAddress.isEmpty && !trimmedAddress.isIPAddress
+        return !trimmedAddress.isEmpty && !trimmedAddress.isValidRelayHost
     }
 
     private var showPortValidation: Bool {
@@ -704,7 +704,7 @@ private struct AddDeviceSheet: View {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedAddress.isEmpty,
-              trimmedAddress.isIPAddress,
+              trimmedAddress.isValidRelayHost,
               !trimmedUsername.isEmpty,
               let parsedPort = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)),
               (1...65535).contains(parsedPort) else {

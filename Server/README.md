@@ -1,6 +1,6 @@
 # Relay WireGuard Server
 
-Minimal centralized WireGuard control server for macOS, with notes for using it from the Relay iOS app.
+Minimal centralized WireGuard control server for macOS, with startup and smoke-test notes for the Relay iOS app.
 
 ## What It Does
 
@@ -12,25 +12,22 @@ Minimal centralized WireGuard control server for macOS, with notes for using it 
 
 ## Relay App Status
 
-The current Relay app no longer depends on hardcoded mock peers.
+The Relay app now has a Relay VPN path in-app:
 
-What the app does today:
+- saved devices remain the SSH target source
+- devices can be added by hostname or IP address
+- Relay VPN onboarding is driven from the app settings
+- the intended flow is a single user-facing Relay app download
 
-- uses a local "Saved Devices" provider
-- lets the user add devices manually by IP address, username, and port
-- stores saved devices on the iPhone or iPad
-- uses Relay's built-in SSH client for the terminal session
+The app still keeps a Tailscale path:
 
-What the app does not do yet:
+- Tailscale remains an alternate network path rather than a separate device provider
+- users can add Tailscale hostnames or IP addresses manually and SSH over an already-working Tailscale connection
 
-- it does not currently own a WireGuard tunnel
-- it does not currently include a first-class Tailscale provider or Tailscale device discovery
-- it does not currently accept DNS hostnames in the add-device flow, only IP addresses
+Current integration note:
 
-That means:
-
-- to use this custom WireGuard server, bring the VPN tunnel up separately in the WireGuard iOS app, then use Relay to SSH to the device's VPN IP
-- if a user already has Tailscale, Relay can still SSH over Tailscale, but only by manually adding the peer's Tailscale IP as a saved device
+- the repo now includes the packet-tunnel target and WireGuardKit wiring, but on this host Xcode 26.4 currently fails inside upstream `WireGuardKitC` while compiling the official package
+- the server startup and smoke-test flow below is still the intended all-in-one app flow once the iOS build is green on your machine
 
 ## Requirements
 
@@ -69,6 +66,16 @@ sudo ./relay-server
 
 The server automatically loads `Server/.env` if it exists. Explicit shell environment variables still win over values in `.env`.
 
+For the Relay iOS app smoke test, use the helper script:
+
+```bash
+cd Server
+cp .env.example .env
+# edit .env with a LAN-reachable HTTP address and the correct server endpoint
+chmod +x scripts/start-relay-for-ios.sh
+./scripts/start-relay-for-ios.sh
+```
+
 Safe template to commit:
 
 ```bash
@@ -85,43 +92,24 @@ If `RELAY_SERVER_ENDPOINT` is not set, the server uses the detected IPv4 address
 
 The server does not use `wg-quick` on macOS. It starts `wireguard-go utun`, resolves the real interface name from `WG_TUN_NAME_FILE`, applies configuration with `wg`, and assigns `10.0.0.1/24` with `ifconfig`.
 
-## Register A Peer
+## Control API
 
-Generate a client keypair on the client:
+The Relay app uses the same `POST /register` control API.
+
+Manual registration is still useful for debugging:
 
 ```bash
 wg genkey | tee client.key | wg pubkey > client.pub
-```
 
-Register the peer:
-
-```bash
 curl -X POST http://127.0.0.1:8080/register \
   -H 'Content-Type: application/json' \
   -d "{\"user_id\":\"alice\",\"public_key\":\"$(cat client.pub)\"}"
-```
-
-Example response:
-
-```json
-{
-  "assigned_ip": "10.0.0.2",
-  "server_public_key": "SERVER_PUBLIC_KEY",
-  "server_endpoint": "SERVER_IP:51820",
-  "persistent_keepalive": 25
-}
 ```
 
 Inspect peers:
 
 ```bash
 curl http://127.0.0.1:8080/peers
-```
-
-Fetch a client config template:
-
-```bash
-curl http://127.0.0.1:8080/config/alice
 ```
 
 ## Use With The Relay iOS App
@@ -154,10 +142,10 @@ cp .env.example .env
 
 Edit `.env`.
 
-For LAN testing, set:
+For the all-in-one Relay app smoke test on the same LAN, set:
 
 ```dotenv
-RELAY_HTTP_ADDR=127.0.0.1:8080
+RELAY_HTTP_ADDR=0.0.0.0:8080
 RELAY_SERVER_ENDPOINT=YOUR_MAC_LAN_IP:51820
 RELAY_EGRESS_INTERFACE=en0
 ```
@@ -165,54 +153,48 @@ RELAY_EGRESS_INTERFACE=en0
 For remote testing, set:
 
 ```dotenv
-RELAY_HTTP_ADDR=127.0.0.1:8080
+RELAY_HTTP_ADDR=0.0.0.0:8080
 RELAY_SERVER_ENDPOINT=YOUR_PUBLIC_IP_OR_DNS:51820
 RELAY_EGRESS_INTERFACE=en0
 ```
 
-Then build and start:
+Then start the server:
 
 ```bash
-go build -o relay-server .
-sudo ./relay-server
+./scripts/start-relay-for-ios.sh
 ```
 
-Keep the control API bound to `127.0.0.1` for now. `/register` has no authentication in this MVP.
+Important:
 
-### 3. Create An iPhone WireGuard Peer
+- `/register` has no authentication in this MVP
+- only bind `RELAY_HTTP_ADDR=0.0.0.0:8080` on a trusted LAN for smoke tests
+- for public internet deployment you should put this control API behind authentication and HTTPS first
 
-In another terminal on the server Mac:
+### 3. Register And Connect In Relay
+
+In the Relay app on iPhone or iPad:
+
+1. Open `Settings`.
+2. In `Network`, choose `Relay VPN`.
+3. Enter the Relay control server URL:
+   `http://YOUR_MAC_LAN_IP:8080`
+4. Keep or edit the generated peer identifier.
+5. Tap `Register And Connect`.
+6. Accept the iOS VPN permission prompt.
+
+Relay should:
+
+- generate the client WireGuard keypair on-device
+- call `POST /register`
+- install the packet-tunnel profile
+- connect the VPN tunnel
+
+On the server you should then see the new peer in:
 
 ```bash
-mkdir -p /tmp/relay-iphone
-cd /tmp/relay-iphone
-
-wg genkey | tee iphone.key | wg pubkey > iphone.pub
-
-curl -X POST http://127.0.0.1:8080/register \
-  -H 'Content-Type: application/json' \
-  -d "{\"user_id\":\"iphone\",\"public_key\":\"$(tr -d '\n' < iphone.pub)\"}"
+curl http://127.0.0.1:8080/peers
+sudo wg show
 ```
-
-Take the returned values and create `iphone.conf`:
-
-```ini
-[Interface]
-PrivateKey = IPHONE_PRIVATE_KEY
-Address = ASSIGNED_IP/24
-
-[Peer]
-PublicKey = SERVER_PUBLIC_KEY
-Endpoint = SERVER_IP:51820
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-```
-
-You can also use `GET /config/iphone` as a template, but you still need to insert the iPhone private key manually.
-
-Import `iphone.conf` into the official WireGuard iOS app and activate the tunnel there.
-
-If you want Relay to SSH to a different computer on the VPN instead of the server Mac, that computer must also be enrolled as a WireGuard peer and reachable at its own VPN IP.
 
 ### 4. Add The Device In Relay
 
@@ -220,11 +202,11 @@ In the Relay app:
 
 1. Open the `Devices` tab.
 2. Tap `+`.
-3. Add the target device using its reachable IP address.
+3. Add the target device using its reachable VPN IP or hostname.
 
 For the simplest test, if the server Mac is also the SSH target, enter:
 
-- IP Address: `10.0.0.1`
+- Host: `10.0.0.1`
 - User: your macOS username
 - Port: `22`
 - Label: anything you want
@@ -232,18 +214,16 @@ For the simplest test, if the server Mac is also the SSH target, enter:
 Important:
 
 - enter the VPN IP of the SSH target, not the public `RELAY_SERVER_ENDPOINT`
-- the current app add-device flow only accepts IP addresses, not hostnames
 - the device shows as online only if Relay can open a quick TCP probe to the configured SSH port
 
 ### 5. Connect In Relay
 
 In Relay:
 
-1. Ensure the WireGuard tunnel is active in the WireGuard iOS app.
-2. Return to Relay and refresh the `Devices` tab.
-3. Tap the saved device.
-4. On first connection, verify and trust the SSH host fingerprint if it matches the target machine.
-5. Enter the SSH password.
+1. Refresh the `Devices` tab if needed.
+2. Tap the saved device.
+3. On first connection, verify and trust the SSH host fingerprint if it matches the target machine.
+4. Enter the SSH password.
 
 After a successful password login, Relay may offer to generate and store an SSH key locally for future logins. That key stays on the device.
 
@@ -266,18 +246,16 @@ In Relay:
 
 ## Using Relay With Tailscale
 
-There is no first-class Tailscale provider in the current app build yet.
+Relay still supports a Tailscale path, but it stays intentionally simple:
 
-If the device already has Tailscale connectivity outside Relay, the current app can still be used by:
+1. make sure the device is already connected to Tailscale outside Relay
+2. add the peer using its Tailscale hostname or Tailscale IP
+3. SSH as usual
 
-1. making sure the device is already connected to Tailscale
-2. manually adding the peer's Tailscale IP address as a saved device in Relay
-3. connecting over SSH as usual
+So the intended distinction now is:
 
-So today the distinction is:
-
-- custom Relay server: WireGuard app owns the tunnel, Relay owns SSH
-- Tailscale: Tailscale app owns the tunnel, Relay owns SSH
+- Relay VPN: Relay owns the tunnel and SSH
+- Tailscale: Tailscale owns the tunnel, Relay owns SSH
 
 ## Example Client Config
 
@@ -311,8 +289,6 @@ On the client:
 curl https://ifconfig.me
 ping 10.0.0.1
 ```
-
-For iPhone testing, import `client.conf` into the official WireGuard app and activate the tunnel there.
 
 For macOS client testing without `wg-quick`:
 

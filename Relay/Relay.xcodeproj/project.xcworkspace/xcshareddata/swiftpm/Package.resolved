@@ -1,5 +1,5 @@
 {
-  "originHash" : "b55a88b6e1a6731f05674bd73fc6282c1cd38264019800c6cf8d00cffad40b2b",
+  "originHash" : "d5ffb9157b6dbf8d89302b499ffcb8b4359ad46552ac0db907c4650c6eae35b0",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -89,6 +89,15 @@
       "state" : {
         "revision" : "8e7a1e154f470e19c709a00a8768df348ba5fc43",
         "version" : "1.13.0"
+      }
+    },
+    {
+      "identity" : "wireguard-apple",
+      "kind" : "remoteSourceControl",
+      "location" : "https://git.zx2c4.com/wireguard-apple",
+      "state" : {
+        "branch" : "am/wgkit-types-subtarget",
+        "revision" : "b538382ef84a17244a01da52bf4991fd2c15df64"
       }
     }
   ],

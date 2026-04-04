@@ -110,7 +110,7 @@ struct ManualDeviceProvider: MeshProvider {
         MeshProviderSnapshot(
             status: .ready(
                 title: "Saved Devices",
-                detail: "Add devices by IP address and Relay will check which ones are reachable over SSH."
+                detail: "Add devices by hostname or IP address and Relay will check which ones are reachable over SSH."
             )
         )
     }
@@ -230,6 +230,26 @@ private extension SavedDevice {
 extension String {
     var isIPAddress: Bool {
         IPv4Address(self) != nil || IPv6Address(self) != nil
+    }
+
+    var isValidRelayHost: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+
+        if trimmed.isIPAddress {
+            return true
+        }
+
+        guard !trimmed.hasPrefix("."),
+              !trimmed.hasSuffix("."),
+              !trimmed.contains("..") else {
+            return false
+        }
+
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.")
+        return trimmed.rangeOfCharacter(from: allowedCharacters.inverted) == nil
     }
 }
 
