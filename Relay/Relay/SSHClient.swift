@@ -9,21 +9,29 @@ import Foundation
 
 struct TerminalLine: Identifiable, Equatable {
     let id = UUID()
-    let text: String
+    var text: String
     let kind: Kind
 
     enum Kind {
-        case localPrompt
         case remoteOutput
         case status
         case error
     }
 }
 
+enum TerminalEvent: Sendable {
+    case output(String)
+    case status(String)
+    case error(String)
+    case disconnected
+}
+
 @MainActor
 protocol SSHClient {
+    func setEventHandler(_ handler: (@MainActor @Sendable (TerminalEvent) -> Void)?)
     func connect(to host: Host) async throws
-    func execute(_ command: String) async throws -> String
+    func sendInput(_ text: String) async throws
+    func resizeTerminal(columns: Int, rows: Int) async
     func disconnect() async
 }
 
@@ -51,6 +59,8 @@ enum SSHClientError: LocalizedError {
     case authenticationFailed
     case invalidChannelType
     case commandDidNotReturnOutput
+    case pseudoTerminalRequestFailed
+    case shellRequestFailed
 
     var errorDescription: String? {
         switch self {
@@ -66,6 +76,10 @@ enum SSHClientError: LocalizedError {
             "The SSH server returned an unexpected channel type."
         case .commandDidNotReturnOutput:
             "The SSH command completed without returning output."
+        case .pseudoTerminalRequestFailed:
+            "The SSH server rejected the terminal request."
+        case .shellRequestFailed:
+            "The SSH server rejected the shell request."
         }
     }
 }
@@ -73,45 +87,116 @@ enum SSHClientError: LocalizedError {
 @MainActor
 final class MockSSHClient: SSHClient {
     private var activeHost: Host?
+    private var currentDirectory = ""
+    private var eventHandler: (@MainActor @Sendable (TerminalEvent) -> Void)?
+
+    func setEventHandler(_ handler: (@MainActor @Sendable (TerminalEvent) -> Void)?) {
+        self.eventHandler = handler
+    }
 
     func connect(to host: Host) async throws {
         try await Task.sleep(for: .milliseconds(350))
         activeHost = host
+        currentDirectory = "/home/\(host.username)"
+        emit(.status("Connected."))
+        emitPrompt()
     }
 
-    func execute(_ command: String) async throws -> String {
+    func sendInput(_ text: String) async throws {
         guard let activeHost else {
             throw SSHClientError.notConnected
         }
 
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw SSHClientError.emptyCommand
-        }
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await Task.sleep(for: .milliseconds(120))
 
-        try await Task.sleep(for: .milliseconds(180))
+            if trimmed.isEmpty {
+                emitPrompt()
+                continue
+            }
 
-        switch trimmed {
-        case "pwd":
-            return "/home/\(activeHost.username)"
-        case "whoami":
-            return activeHost.username
-        case "hostname":
-            return activeHost.hostname
-        case "ls":
-            return "logs\nreleases\nshared"
-        case "help":
-            return "Try pwd, whoami, hostname, ls, uname -a"
-        case "clear":
-            return ""
-        default:
-            return """
-            mock@\(activeHost.hostname): command not found: \(trimmed)
-            """
+            emit(.output("\(activeHost.username)@\(activeHost.hostname):\(currentDirectory)$ \(trimmed)\n"))
+
+            switch trimmed {
+            case "pwd":
+                emit(.output("\(currentDirectory)\n"))
+            case "whoami":
+                emit(.output("\(activeHost.username)\n"))
+            case "hostname":
+                emit(.output("\(activeHost.hostname)\n"))
+            case "ls":
+                emit(.output("logs\nreleases\nshared\n"))
+            case "help":
+                emit(.output("Try pwd, whoami, hostname, ls, cd /tmp, uname -a\n"))
+            case "clear":
+                emit(.output("\u{001B}[2J\u{001B}[H"))
+            case "uname -a":
+                emit(.output("MockOS relay 1.0.0 Darwin Kernel Version\n"))
+            default:
+                if let directory = trimmed.removingPrefix("cd ") {
+                    currentDirectory = resolve(path: directory, from: currentDirectory)
+                } else {
+                    emit(.output("mock@\(activeHost.hostname): command not found: \(trimmed)\n"))
+                }
+            }
+
+            emitPrompt()
         }
+    }
+
+    func resizeTerminal(columns: Int, rows: Int) async {
+        _ = (columns, rows)
     }
 
     func disconnect() async {
         activeHost = nil
+        emit(.disconnected)
+    }
+
+    private func emitPrompt() {
+        guard let activeHost else { return }
+        emit(.output("\(activeHost.username)@\(activeHost.hostname):\(currentDirectory)$ "))
+    }
+
+    private func emit(_ event: TerminalEvent) {
+        guard let eventHandler else { return }
+        eventHandler(event)
+    }
+
+    private func resolve(path: String, from base: String) -> String {
+        guard !path.isEmpty else { return base }
+
+        if path.hasPrefix("/") {
+            return normalize(path)
+        }
+
+        return normalize(base + "/" + path)
+    }
+
+    private func normalize(_ path: String) -> String {
+        var components: [Substring] = []
+
+        for component in path.split(separator: "/") {
+            switch component {
+            case ".":
+                continue
+            case "..":
+                if !components.isEmpty {
+                    components.removeLast()
+                }
+            default:
+                components.append(component)
+            }
+        }
+
+        return "/" + components.joined(separator: "/")
+    }
+}
+
+private extension String {
+    func removingPrefix(_ prefix: String) -> String? {
+        guard hasPrefix(prefix) else { return nil }
+        return String(dropFirst(prefix.count))
     }
 }

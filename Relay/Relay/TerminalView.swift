@@ -36,24 +36,36 @@ struct TerminalView: View {
 
     private var terminalOutput: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(viewModel.lines) { line in
-                        Text(line.text)
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(color(for: line.kind))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                            .id(line.id)
+            GeometryReader { geometry in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(viewModel.lines) { line in
+                            Text(line.text)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(color(for: line.kind))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .id(line.id)
+                        }
+                    }
+                    .padding()
+                }
+                .background(Color.black)
+                .onAppear {
+                    Task {
+                        await viewModel.resizeTerminal(to: geometry.size)
                     }
                 }
-                .padding()
-            }
-            .background(Color.black)
-            .onChange(of: viewModel.lines.count) {
-                guard let lastLine = viewModel.lines.last else { return }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo(lastLine.id, anchor: .bottom)
+                .onChange(of: geometry.size) { _, newSize in
+                    Task {
+                        await viewModel.resizeTerminal(to: newSize)
+                    }
+                }
+                .onChange(of: viewModel.lines.count) {
+                    guard let lastLine = viewModel.lines.last else { return }
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(lastLine.id, anchor: .bottom)
+                    }
                 }
             }
         }
@@ -61,11 +73,7 @@ struct TerminalView: View {
 
     private var commandBar: some View {
         HStack(spacing: 12) {
-            Text("$")
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            TextField("Enter a command", text: $viewModel.command)
+            TextField("Enter shell input", text: $viewModel.command)
                 .font(.system(.body, design: .monospaced))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -73,17 +81,17 @@ struct TerminalView: View {
                 .submitLabel(.send)
                 .onSubmit {
                     Task {
-                        await viewModel.runCommand()
+                        await viewModel.sendCommand()
                     }
                 }
 
-            Button("Run") {
+            Button("Send") {
                 Task {
-                    await viewModel.runCommand()
+                    await viewModel.sendCommand()
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!viewModel.isConnected || viewModel.isRunningCommand)
+            .disabled(!viewModel.isConnected)
         }
         .padding()
         .background(.background)
@@ -91,8 +99,6 @@ struct TerminalView: View {
 
     private func color(for kind: TerminalLine.Kind) -> Color {
         switch kind {
-        case .localPrompt:
-            .green
         case .remoteOutput:
             .white
         case .status:
