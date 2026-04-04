@@ -10,14 +10,13 @@ import Foundation
 enum AppEnvironment {
     static let sshTransportMode: SSHTransportMode = .real
 
-    // Replace these with the real SSH credentials for the Mac you want the
-    // phone to connect to. The address must be reachable from the phone.
+    // Replace these with the real device addresses and usernames. The password
+    // is entered by the user at connection time.
     static let mockPeers: [PeerDevice] = [
         PeerDevice(
             name: "macbook",
             networkAddress: "10.186.120.143",
             sshUsername: "ryanbaker",
-            sshPassword: "REPLACE_WITH_MAC_PASSWORD",
             isOnline: true,
             operatingSystem: "macOS",
             ownerName: "Ryan Baker"

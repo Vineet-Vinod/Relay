@@ -13,6 +13,7 @@ struct HostListView: View {
     @State private var peers: [PeerDevice] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var selectedHost: Host?
 
     var body: some View {
         List {
@@ -30,8 +31,8 @@ struct HostListView: View {
             }
 
             ForEach(peers) { peer in
-                NavigationLink {
-                    TerminalView(viewModel: TerminalSessionViewModel(host: Host(peer: peer)))
+                Button {
+                    selectedHost = Host(peer: peer)
                 } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Circle()
@@ -59,6 +60,7 @@ struct HostListView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .buttonStyle(.plain)
                 .disabled(!peer.isOnline)
             }
         }
@@ -69,6 +71,11 @@ struct HostListView: View {
         }
         .refreshable {
             await loadPeers()
+        }
+        .sheet(item: $selectedHost) { host in
+            NavigationStack {
+                SSHLoginView(host: host)
+            }
         }
     }
 
@@ -90,6 +97,62 @@ struct HostListView: View {
         }
 
         isLoading = false
+    }
+}
+
+private struct SSHLoginView: View {
+    let host: Host
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+    @State private var connectNow = false
+
+    var body: some View {
+        Form {
+            Section("Connection") {
+                Text(host.name)
+                Text("\(host.username)@\(host.hostname):\(host.port)")
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Section("Password") {
+                SecureField("SSH password", text: $password)
+                    .textContentType(.password)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            Section {
+                Button("Connect") {
+                    connectNow = true
+                }
+                .disabled(password.isEmpty)
+            }
+        }
+        .navigationTitle("SSH Login")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+        }
+        .navigationDestination(isPresented: $connectNow) {
+            TerminalView(
+                viewModel: TerminalSessionViewModel(
+                    host: Host(
+                        id: host.id,
+                        name: host.name,
+                        hostname: host.hostname,
+                        port: host.port,
+                        username: host.username,
+                        password: password
+                    )
+                )
+            )
+        }
     }
 }
 

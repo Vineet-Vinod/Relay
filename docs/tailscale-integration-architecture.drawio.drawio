@@ -1,0 +1,85 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Tailscale Integration" id="PfuB3jXdBQWBNCUiXM_J">
+    <mxGraphModel dx="1414" dy="874" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-19" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=20;fontStyle=1;" value="Relay Architecture: Optional Tailscale Integration" vertex="1">
+          <mxGeometry height="30" width="520" x="60" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-20" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;spacing=8;" value="Relay iOS App&#xa;- SwiftUI screens&#xa;- Terminal session UI&#xa;- SSH client" vertex="1">
+          <mxGeometry height="120" width="220" x="60" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-21" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;spacing=8;" value="MeshProvider interface&#xa;- currentStatus()&#xa;- fetchPeers()&#xa;- endpoint(for:)" vertex="1">
+          <mxGeometry height="120" width="240" x="360" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-22" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;spacing=8;" value="MockMeshProvider&#xa;Local sample peers" vertex="1">
+          <mxGeometry height="80" width="210" x="700" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-23" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;spacing=8;" value="TailscaleMeshProvider&#xa;- checks Tailscale status&#xa;- fetches peers/endpoints&#xa;- returns reachable host" vertex="1">
+          <mxGeometry height="110" width="210" x="700" y="165" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-24" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;spacing=8;" value="Future RelayVPNMeshProvider&#xa;- custom VPN later&#xa;- same app-facing contract" vertex="1">
+          <mxGeometry height="90" width="210" x="700" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-25" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=14;spacing=8;" value="Tailscale iOS / macOS app&#xa;Owns VPN tunnel" vertex="1">
+          <mxGeometry height="80" width="190" x="1010" y="170" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-26" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=14;spacing=8;" value="Tailscale API / control plane&#xa;Peer metadata and network state" vertex="1">
+          <mxGeometry height="85" width="190" x="1010" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-27" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=14;spacing=8;" value="Peer devices&#xa;SSH over mesh address" vertex="1">
+          <mxGeometry height="90" width="240" x="360" y="355" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-28" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="xd4RhSJIUaQUiqw4aaXv-21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-29" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeWidth=2;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="xd4RhSJIUaQUiqw4aaXv-22" value="swap by config">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-30" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitX=0.992;exitY=0.35;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;exitPerimeter=0;" target="xd4RhSJIUaQUiqw4aaXv-23" value="default real provider">
+          <mxGeometry relative="1" x="0.0139" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-31" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" value="later">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="480" y="320" />
+              <mxPoint x="700" y="320" />
+            </Array>
+            <mxPoint x="700" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-32" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitX=1;exitY=0.85;exitDx=0;exitDy=0;entryX=0;entryY=0.35;entryDx=0;entryDy=0;" target="xd4RhSJIUaQUiqw4aaXv-27" value="SSH">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-33" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitX=1;exitY=0.35;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="xd4RhSJIUaQUiqw4aaXv-25" value="status / install / tunnel ownership">
+          <mxGeometry relative="1" x="0.1434" y="10" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="910" y="150" />
+              <mxPoint x="1105" y="150" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-34" edge="1" parent="1" source="xd4RhSJIUaQUiqw4aaXv-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="xd4RhSJIUaQUiqw4aaXv-26" value="peer discovery">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-35" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;dashed=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="xd4RhSJIUaQUiqw4aaXv-27" value="mesh endpoints">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="700" y="230" />
+              <mxPoint x="630" y="230" />
+              <mxPoint x="630" y="400" />
+            </Array>
+            <mxPoint x="700" y="230" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xd4RhSJIUaQUiqw4aaXv-36" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;spacing=8;" value="Keep the app bound to MeshProvider so Tailscale is optional now and replaceable later." vertex="1">
+          <mxGeometry height="55" width="540" x="60" y="480" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

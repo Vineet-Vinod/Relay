@@ -12,7 +12,6 @@ struct PeerDevice: Identifiable, Hashable {
     let name: String
     let networkAddress: String
     let sshUsername: String
-    let sshPassword: String?
     let isOnline: Bool
     let operatingSystem: String
     let ownerName: String
@@ -22,7 +21,6 @@ struct PeerDevice: Identifiable, Hashable {
         name: String,
         networkAddress: String,
         sshUsername: String,
-        sshPassword: String? = nil,
         isOnline: Bool,
         operatingSystem: String,
         ownerName: String
@@ -31,7 +29,6 @@ struct PeerDevice: Identifiable, Hashable {
         self.name = name
         self.networkAddress = networkAddress
         self.sshUsername = sshUsername
-        self.sshPassword = sshPassword
         self.isOnline = isOnline
         self.operatingSystem = operatingSystem
         self.ownerName = ownerName

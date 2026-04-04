@@ -33,13 +33,13 @@ struct Host: Identifiable, Hashable, Codable {
 }
 
 extension Host {
-    init(peer: PeerDevice, port: Int = 22) {
+    init(peer: PeerDevice, password: String? = nil, port: Int = 22) {
         self.init(
             name: peer.name,
             hostname: peer.networkAddress,
             port: port,
             username: peer.sshUsername,
-            password: peer.sshPassword
+            password: password
         )
     }
 }
