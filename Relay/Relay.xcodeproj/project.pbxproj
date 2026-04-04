@@ -10,55 +10,16 @@
 		6A0100012F81500000463020 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = 6A0100032F81500000463020 /* NIOSSH */; };
 		6A0100022F81500000463020 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = 6A0100042F81500000463020 /* NIOTransportServices */; };
 		6A01000A2F81500000463020 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 6A01000C2F81500000463020 /* SwiftTerm */; };
-		7B1000012F90000100463020 /* WireGuardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7B1000162F90000100463020 /* WireGuardKit */; };
-		7B1000022F90000100463020 /* RelayTunnelExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 7B1000032F90000100463020 /* RelayTunnelExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
-
-/* Begin PBXContainerItemProxy section */
-		7B1000092F90000100463020 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 3792B0BC2F8148F100463020 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7B1000072F90000100463020;
-			remoteInfo = RelayTunnelExtension;
-		};
-		7B10000A2F90000100463020 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 3792B0BC2F8148F100463020 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7B1000082F90000100463020;
-			remoteInfo = WireGuardGoBridgeiOS;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		7B1000052F90000100463020 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				7B1000022F90000100463020 /* RelayTunnelExtension.appex in Embed App Extensions */,
-			);
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		3792B0C42F8148F100463020 /* Relay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Relay.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7B1000032F90000100463020 /* RelayTunnelExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RelayTunnelExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3792B0C62F8148F100463020 /* Relay */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Relay;
-			sourceTree = "<group>";
-		};
-		7B1000042F90000100463020 /* RelayTunnelExtension */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = RelayTunnelExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -74,14 +35,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		7B1000062F90000100463020 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				7B1000012F90000100463020 /* WireGuardKit in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -89,7 +42,6 @@
 			isa = PBXGroup;
 			children = (
 				3792B0C62F8148F100463020 /* Relay */,
-				7B1000042F90000100463020 /* Relay/RelayTunnelExtension */,
 				3792B0C52F8148F100463020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -98,29 +50,11 @@
 			isa = PBXGroup;
 			children = (
 				3792B0C42F8148F100463020 /* Relay.app */,
-				7B1000032F90000100463020 /* RelayTunnelExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
-
-/* Begin PBXLegacyTarget section */
-		7B1000082F90000100463020 /* WireGuardGoBridgeiOS */ = {
-			isa = PBXLegacyTarget;
-			buildArgumentsString = "-lc \"\\\"$SRCROOT/scripts/build-wireguard-go-bridge.sh\\\"\"";
-			buildConfigurationList = 7B1000142F90000100463020 /* Build configuration list for PBXLegacyTarget "WireGuardGoBridgeiOS" */;
-			buildPhases = (
-			);
-			buildToolPath = /bin/sh;
-			buildWorkingDirectory = /;
-			dependencies = (
-			);
-			name = WireGuardGoBridgeiOS;
-			passBuildSettingsInEnvironment = 1;
-			productName = WireGuardGoBridgeiOS;
-		};
-/* End PBXLegacyTarget section */
 
 /* Begin PBXNativeTarget section */
 		3792B0C32F8148F100463020 /* Relay */ = {
@@ -130,12 +64,10 @@
 				3792B0C02F8148F100463020 /* Sources */,
 				3792B0C12F8148F100463020 /* Frameworks */,
 				3792B0C22F8148F100463020 /* Resources */,
-				7B1000052F90000100463020 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				7B10000B2F90000100463020 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				3792B0C62F8148F100463020 /* Relay */,
@@ -150,30 +82,6 @@
 			productReference = 3792B0C42F8148F100463020 /* Relay.app */;
 			productType = "com.apple.product-type.application";
 		};
-		7B1000072F90000100463020 /* RelayTunnelExtension */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 7B1000132F90000100463020 /* Build configuration list for PBXNativeTarget "RelayTunnelExtension" */;
-			buildPhases = (
-				7B10000D2F90000100463020 /* Sources */,
-				7B1000062F90000100463020 /* Frameworks */,
-				7B10000E2F90000100463020 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				7B10000C2F90000100463020 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				7B1000042F90000100463020 /* Relay/RelayTunnelExtension */,
-			);
-			name = RelayTunnelExtension;
-			packageProductDependencies = (
-				7B1000162F90000100463020 /* WireGuardKit */,
-			);
-			productName = RelayTunnelExtension;
-			productReference = 7B1000032F90000100463020 /* RelayTunnelExtension.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -185,9 +93,6 @@
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					3792B0C32F8148F100463020 = {
-						CreatedOnToolsVersion = 26.4;
-					};
-					7B1000072F90000100463020 = {
 						CreatedOnToolsVersion = 26.4;
 					};
 				};
@@ -205,7 +110,6 @@
 				6A0100052F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 				6A0100062F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */,
 				6A01000B2F81500000463020 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
-				7B1000152F90000100463020 /* XCRemoteSwiftPackageReference "wireguard-apple" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3792B0C52F8148F100463020 /* Products */;
@@ -213,21 +117,12 @@
 			projectRoot = "";
 			targets = (
 				3792B0C32F8148F100463020 /* Relay */,
-				7B1000072F90000100463020 /* RelayTunnelExtension */,
-				7B1000082F90000100463020 /* WireGuardGoBridgeiOS */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		3792B0C22F8148F100463020 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		7B10000E2F90000100463020 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -244,27 +139,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		7B10000D2F90000100463020 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXTargetDependency section */
-		7B10000B2F90000100463020 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7B1000072F90000100463020 /* RelayTunnelExtension */;
-			targetProxy = 7B1000092F90000100463020 /* PBXContainerItemProxy */;
-		};
-		7B10000C2F90000100463020 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7B1000082F90000100463020 /* WireGuardGoBridgeiOS */;
-			targetProxy = 7B10000A2F90000100463020 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		3792B0CD2F8148F200463020 /* Debug */ = {
@@ -327,7 +202,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
-				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -385,7 +259,6 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -395,14 +268,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Relay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = HVYQ5S276L;
+				DEVELOPMENT_TEAM = 57935535S7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Relay connects to devices and control servers on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -419,7 +289,6 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -431,14 +300,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Relay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = HVYQ5S276L;
+				DEVELOPMENT_TEAM = 57935535S7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Relay connects to devices and control servers on your local network.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -455,82 +321,9 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		7B10000F2F90000100463020 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = RelayTunnelExtension/RelayTunnelExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = HVYQ5S276L;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = RelayTunnelExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = rybkr.Relay.RelayTunnelExtension;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		7B1000102F90000100463020 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = RelayTunnelExtension/RelayTunnelExtension.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = HVYQ5S276L;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = RelayTunnelExtension/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = rybkr.Relay.RelayTunnelExtension;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		7B1000112F90000100463020 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				SDKROOT = iphoneos;
-			};
-			name = Debug;
-		};
-		7B1000122F90000100463020 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				SDKROOT = iphoneos;
 			};
 			name = Release;
 		};
@@ -551,24 +344,6 @@
 			buildConfigurations = (
 				3792B0D02F8148F200463020 /* Debug */,
 				3792B0D12F8148F200463020 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		7B1000132F90000100463020 /* Build configuration list for PBXNativeTarget "RelayTunnelExtension" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				7B10000F2F90000100463020 /* Debug */,
-				7B1000102F90000100463020 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		7B1000142F90000100463020 /* Build configuration list for PBXLegacyTarget "WireGuardGoBridgeiOS" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				7B1000112F90000100463020 /* Debug */,
-				7B1000122F90000100463020 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -600,14 +375,6 @@
 				minimumVersion = 1.13.0;
 			};
 		};
-		7B1000152F90000100463020 /* XCRemoteSwiftPackageReference "wireguard-apple" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://git.zx2c4.com/wireguard-apple";
-			requirement = {
-				branch = "am/wgkit-types-subtarget";
-				kind = branch;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -625,11 +392,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6A01000B2F81500000463020 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
-		};
-		7B1000162F90000100463020 /* WireGuardKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 7B1000152F90000100463020 /* XCRemoteSwiftPackageReference "wireguard-apple" */;
-			productName = WireGuardKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

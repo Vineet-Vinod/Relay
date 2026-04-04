@@ -18,7 +18,6 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
-    @AppStorage(RelayDefaultsKey.preferredNetworkPath) private var preferredNetworkPathRawValue = RelayNetworkPath.relayVPN.rawValue
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
     @State private var storedKeys: [SSHStoredKeyRecord] = []
@@ -29,7 +28,6 @@ struct SettingsView: View {
     @State private var exportDocument = SavedDevicesDocument(devices: [])
     @State private var destructiveAction: SettingsDestructiveAction?
     @State private var notice: SettingsNotice?
-    @StateObject private var relayVPNController = RelayVPNController()
 
     var body: some View {
         List {
@@ -38,11 +36,6 @@ struct SettingsView: View {
             }
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             .listRowBackground(Color.clear)
-
-            RelayVPNSettingsSection(
-                selectedNetworkPath: preferredNetworkPathBinding,
-                controller: relayVPNController
-            )
 
             Section {
                 settingsValueRow(
@@ -333,13 +326,6 @@ struct SettingsView: View {
         return "\(clampedSize.formatted(.number.precision(.fractionLength(1)))) pt"
     }
 
-    private var preferredNetworkPathBinding: Binding<RelayNetworkPath> {
-        Binding(
-            get: { RelayNetworkPath(rawValue: preferredNetworkPathRawValue) ?? .relayVPN },
-            set: { preferredNetworkPathRawValue = $0.rawValue }
-        )
-    }
-
     private func overviewMetric(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
             Text(title)
@@ -396,7 +382,6 @@ struct SettingsView: View {
         providerSnapshot = await provider.currentSnapshot()
         savedDevices = await SavedDeviceStore.shared.hosts()
         reloadCredentialData()
-        await relayVPNController.load()
     }
 
     private func reloadCredentialData() {
@@ -467,7 +452,6 @@ struct SettingsView: View {
                 message: "Relay removed locally stored SSH private keys from the Keychain."
             )
         case .eraseRelayData:
-            await relayVPNController.resetStoredState()
             RelayServices.sshCredentials.eraseAllData()
             await SavedDeviceStore.shared.eraseAll()
             RelayPreferences.shared.reset()
