@@ -58,6 +58,8 @@ final class VoiceSessionViewModel {
     var isMuted = false
     var isPrepared = false
     var isEnding = false
+    var availableAudioRoutes: [VoiceAudioSessionCoordinator.AudioRouteOption] = []
+    var selectedAudioRoute: VoiceAudioSessionCoordinator.AudioRouteOption = .receiver
 
     var hasDraftUserSpeech: Bool {
         !draftUserSpeech.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -98,6 +100,8 @@ final class VoiceSessionViewModel {
         self.playback = playback
         self.audioSession = audioSession
         self.controlSoundPlayer = controlSoundPlayer
+        self.availableAudioRoutes = audioSession.availableRoutes
+        self.selectedAudioRoute = audioSession.selectedRoute
 
         self.recognizer.onPartialTranscription = { [weak self] text in
             self?.handlePartialTranscript(text)
@@ -141,6 +145,10 @@ final class VoiceSessionViewModel {
                 return
             }
 
+            if self.isFailedStatus {
+                return
+            }
+
             if self.shouldResumeListeningAfterPlayback {
                 self.shouldResumeListeningAfterPlayback = false
                 self.beginListeningIfPossible()
@@ -151,6 +159,11 @@ final class VoiceSessionViewModel {
             } else {
                 self.status = .ready
             }
+        }
+
+        self.audioSession.onRouteStateChanged = { [weak self] routes, selected in
+            self?.availableAudioRoutes = routes
+            self?.selectedAudioRoute = selected
         }
     }
 
@@ -244,15 +257,12 @@ final class VoiceSessionViewModel {
     func toggleMute() {
         cancelMuteTransition()
         cancelSendCuePauseTask()
-        isMuted.toggle()
         if isMuted {
-            recognizer.stopListening()
-            clearDraftUserSpeech()
-            status = .muted
-            controlSoundPlayer.play(.mute)
-        } else {
-            status = statusAfterUnmuting()
+            isMuted = false
+            status = currentStatusForSessionPhase()
             scheduleListeningResumeAfterUnmuteCue()
+        } else {
+            setMicrophoneMuted(true, playCue: true, clearDraft: true)
         }
     }
 
@@ -291,6 +301,17 @@ final class VoiceSessionViewModel {
 
     func updateSpeechRate(_ speechRate: Double) {
         playback.updateRate(Float(RelayVoicePreference.clampSpeechRate(speechRate)))
+    }
+
+    func selectAudioRoute(_ route: VoiceAudioSessionCoordinator.AudioRouteOption) {
+        do {
+            try audioSession.selectRoute(route)
+            latestErrorMessage = nil
+        } catch {
+            let message = "Relay couldn't switch audio output."
+            latestErrorMessage = message
+            appendTranscript(kind: .system, text: "\(message) \(error.localizedDescription)")
+        }
     }
 
     func finishCurrentTurn() {
@@ -348,7 +369,7 @@ final class VoiceSessionViewModel {
         controlSoundPlayer.stop()
     }
 
-    private func statusAfterUnmuting() -> Status {
+    private func currentStatusForSessionPhase() -> Status {
         if playback.isSpeakingOrQueued {
             return .speaking
         }
@@ -357,11 +378,44 @@ final class VoiceSessionViewModel {
             return .processing
         }
 
+        if isMuted {
+            return .muted
+        }
+
         if isPrepared {
             return .ready
         }
 
         return .preparing
+    }
+
+    private func setMicrophoneMuted(_ muted: Bool, playCue: Bool, clearDraft: Bool) {
+        isMuted = muted
+
+        if muted {
+            recognizer.stopListening()
+            if clearDraft {
+                clearDraftUserSpeech()
+            }
+
+            status = currentStatusForSessionPhase()
+
+            if playCue {
+                controlSoundPlayer.play(.mute)
+            }
+
+            return
+        }
+
+        status = currentStatusForSessionPhase()
+    }
+
+    private var isFailedStatus: Bool {
+        if case .failed = status {
+            return true
+        }
+
+        return false
     }
 
     private func handlePartialTranscript(_ text: String) {
@@ -481,6 +535,7 @@ final class VoiceSessionViewModel {
 
         cancelSendCuePauseTask()
         clearDraftUserSpeech()
+        setMicrophoneMuted(true, playCue: false, clearDraft: false)
         appendTranscript(kind: .user, text: trimmed)
         status = .processing
         shouldResumeListeningAfterPlayback = true
@@ -504,6 +559,7 @@ final class VoiceSessionViewModel {
 
             await MainActor.run {
                 self.activeTurnTask = nil
+                guard !self.isEnding, !self.isFailedStatus else { return }
                 if self.didReceiveAssistantDone && !self.playback.isSpeakingOrQueued {
                     self.beginListeningIfPossible()
                 } else if !self.didReceiveAssistantDone && !Task.isCancelled {
