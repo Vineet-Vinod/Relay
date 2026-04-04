@@ -48,6 +48,7 @@ enum SSHClientError: LocalizedError {
     case emptyCommand
     case missingPassword
     case notConnected
+    case authenticationFailed
     case invalidChannelType
     case commandDidNotReturnOutput
 
@@ -59,6 +60,8 @@ enum SSHClientError: LocalizedError {
             "No SSH password is configured for this device."
         case .notConnected:
             "No active SSH session."
+        case .authenticationFailed:
+            "Authentication failed. Check the SSH password and try again."
         case .invalidChannelType:
             "The SSH server returned an unexpected channel type."
         case .commandDidNotReturnOutput:

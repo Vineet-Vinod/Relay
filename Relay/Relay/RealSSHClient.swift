@@ -74,17 +74,21 @@ private final class SSHConnectionSession {
             inboundChildChannelInitializer: nil
         )
         let sshHandlerBox = SSHHandlerBox(handler: sshHandler)
+        let authenticationPromise = group.next().makePromise(of: Void.self)
+        let authenticationHandler = SSHAuthenticationStateHandler(authenticationPromise: authenticationPromise)
 
         let bootstrap = NIOTSConnectionBootstrap(group: group)
             .channelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(sshHandlerBox.handler)
+                    try channel.pipeline.syncOperations.addHandler(authenticationHandler)
                     try channel.pipeline.syncOperations.addHandler(SSHErrorHandler())
                 }
             }
 
         do {
             let rootChannel = try await bootstrap.connect(host: host.hostname, port: host.port).get()
+            try await authenticationPromise.futureResult.get()
             return SSHConnectionSession(group: group, rootChannel: rootChannel, sshHandler: sshHandler)
         } catch {
             try? await group.shutdownGracefully()
@@ -191,6 +195,71 @@ private nonisolated final class SSHErrorHandler: ChannelInboundHandler {
     nonisolated
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         context.close(promise: nil)
+    }
+}
+
+private nonisolated final class SSHAuthenticationStateHandler: ChannelInboundHandler {
+    typealias InboundIn = Any
+
+    private let authenticationPromise: EventLoopPromise<Void>
+    private var hasCompleted = false
+
+    init(authenticationPromise: EventLoopPromise<Void>) {
+        self.authenticationPromise = authenticationPromise
+    }
+
+    nonisolated
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if event is UserAuthSuccessEvent {
+            self.succeedIfNeeded()
+        }
+
+        context.fireUserInboundEventTriggered(event)
+    }
+
+    nonisolated
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        self.failIfNeeded(error)
+        context.fireErrorCaught(error)
+    }
+
+    nonisolated
+    func channelInactive(context: ChannelHandlerContext) {
+        self.failIfNeeded(SSHClientError.authenticationFailed)
+        context.fireChannelInactive()
+    }
+
+    nonisolated
+    func handlerRemoved(context: ChannelHandlerContext) {
+        self.failIfNeeded(SSHClientError.authenticationFailed)
+    }
+
+    nonisolated
+    private func succeedIfNeeded() {
+        guard !self.hasCompleted else { return }
+        self.hasCompleted = true
+        self.authenticationPromise.succeed(())
+    }
+
+    nonisolated
+    private func failIfNeeded(_ error: Error) {
+        guard !self.hasCompleted else { return }
+        self.hasCompleted = true
+        self.authenticationPromise.fail(self.normalize(error))
+    }
+
+    nonisolated
+    private func normalize(_ error: Error) -> Error {
+        if error is SSHClientError {
+            return error
+        }
+
+        let message = String(describing: error).lowercased()
+        if message.contains("user auth") || message.contains("authentication") {
+            return SSHClientError.authenticationFailed
+        }
+
+        return error
     }
 }
 

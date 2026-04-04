@@ -21,6 +21,10 @@ struct TerminalView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await viewModel.connect()
+
+            guard viewModel.isConnected else { return }
+
+            try? await Task.sleep(for: .milliseconds(250))
             isCommandFieldFocused = true
         }
         .onDisappear {
