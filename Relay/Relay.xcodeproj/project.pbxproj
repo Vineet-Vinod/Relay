@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		6A0100012F81500000463020 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = 6A0100032F81500000463020 /* NIOSSH */; };
 		6A0100022F81500000463020 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = 6A0100042F81500000463020 /* NIOTransportServices */; };
+		6A01000A2F81500000463020 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 6A01000C2F81500000463020 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6A01000A2F81500000463020 /* SwiftTerm in Frameworks */,
 				6A0100012F81500000463020 /* NIOSSH in Frameworks */,
 				6A0100022F81500000463020 /* NIOTransportServices in Frameworks */,
 			);
@@ -72,6 +74,7 @@
 			);
 			name = Relay;
 			packageProductDependencies = (
+				6A01000C2F81500000463020 /* SwiftTerm */,
 				6A0100032F81500000463020 /* NIOSSH */,
 				6A0100042F81500000463020 /* NIOTransportServices */,
 			);
@@ -106,6 +109,7 @@
 			packageReferences = (
 				6A0100052F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 				6A0100062F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */,
+				6A01000B2F81500000463020 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3792B0C52F8148F100463020 /* Products */;
@@ -363,6 +367,14 @@
 				minimumVersion = 1.26.0;
 			};
 		};
+		6A01000B2F81500000463020 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.13.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -375,6 +387,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6A0100062F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */;
 			productName = NIOTransportServices;
+		};
+		6A01000C2F81500000463020 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6A01000B2F81500000463020 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

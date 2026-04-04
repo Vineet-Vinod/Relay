@@ -7,12 +7,41 @@
 
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
-    private let meshService = MockMeshServiceClient()
+    private enum Tab: Hashable {
+        case devices
+        case settings
+    }
+
+    private let provider: any MeshProvider
+    @State private var selectedTab: Tab = .devices
+
+    init() {
+        self.provider = ManualDeviceProvider()
+    }
+
+    init(provider: any MeshProvider) {
+        self.provider = provider
+    }
 
     var body: some View {
-        NavigationStack {
-            HostListView(service: meshService)
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                HostListView(provider: provider)
+            }
+            .tabItem {
+                Label("Devices", systemImage: "desktopcomputer")
+            }
+            .tag(Tab.devices)
+
+            NavigationStack {
+                SettingsView(provider: provider)
+            }
+            .tabItem {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .tag(Tab.settings)
         }
     }
 }
