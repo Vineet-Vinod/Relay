@@ -12,7 +12,6 @@ import UIKit
 @MainActor
 @Observable
 final class VoiceSessionViewModel {
-    private static let automaticTurnFinishDelay: Duration = .seconds(1.1)
     private static let unmuteListeningResumeDelay: Duration = .milliseconds(90)
 
     enum Status: Equatable {
@@ -58,7 +57,14 @@ final class VoiceSessionViewModel {
     var isMuted = false
     var isPrepared = false
     var isEnding = false
-    var isAwaitingTurnCompletion = false
+
+    var hasDraftUserSpeech: Bool {
+        !draftUserSpeech.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var isAwaitingSendCue: Bool {
+        hasDraftUserSpeech && !isMuted && activeTurnTask == nil && !isEnding
+    }
 
     private let bridgeClient: CodexBridgeClient
     private let recognizer: SpeechRecognizerService
@@ -67,11 +73,12 @@ final class VoiceSessionViewModel {
     private let controlSoundPlayer: VoiceControlSoundPlayer
 
     private var activeTurnTask: Task<Void, Never>?
-    private var autoFinishTask: Task<Void, Never>?
     private var muteTransitionTask: Task<Void, Never>?
     private var assistantSpeechBuffer = ""
     private var didReceiveAssistantDone = false
     private var shouldResumeListeningAfterPlayback = false
+    private var committedDraftSpeech = ""
+    private var liveDraftSpeech = ""
 
     init(
         configuration: VoiceSessionConfiguration,
@@ -94,14 +101,12 @@ final class VoiceSessionViewModel {
             self?.handlePartialTranscript(text)
         }
         self.recognizer.onFinalTranscription = { [weak self] text in
-            self?.cancelPendingAutoFinish()
             self?.handleFinalTranscript(text)
         }
         self.recognizer.onRecognitionEvent = { [weak self] event in
             self?.handleRecognitionEvent(event)
         }
         self.recognizer.onError = { [weak self] message in
-            self?.cancelPendingAutoFinish()
             self?.latestErrorMessage = message
             self?.appendTranscript(kind: .system, text: message)
             if self?.isMuted == true {
@@ -114,6 +119,18 @@ final class VoiceSessionViewModel {
         self.playback.onDidStartSpeaking = { [weak self] in
             guard let self, !self.isEnding else { return }
             self.status = .speaking
+        }
+        self.playback.onDidStartUtterance = { [weak self] kind, text in
+            guard let self else { return }
+            if kind == .assistant {
+                self.revealAssistantSpeech(text)
+            }
+        }
+        self.playback.onDidSkipUtterance = { [weak self] kind, text in
+            guard let self else { return }
+            if kind == .assistant {
+                self.revealAssistantSpeech(text)
+            }
         }
         self.playback.onDidFinishQueue = { [weak self] in
             guard let self else { return }
@@ -138,18 +155,16 @@ final class VoiceSessionViewModel {
     private func handleRecognitionEvent(_ event: SpeechRecognizerService.RecognitionEvent) {
         switch event {
         case .cancelled:
-            cancelPendingAutoFinish()
-            isAwaitingTurnCompletion = false
+            syncDraftUserSpeech()
         case .noSpeechDetected:
-            cancelPendingAutoFinish()
-            draftUserSpeech = ""
-            isAwaitingTurnCompletion = false
+            liveDraftSpeech = ""
+            syncDraftUserSpeech()
             latestErrorMessage = nil
             Task { @MainActor [weak self] in
                 await Task.yield()
                 guard let self else { return }
                 if !self.isMuted && !self.isEnding && self.activeTurnTask == nil && !self.playback.isSpeakingOrQueued {
-                    self.beginListeningIfPossible()
+                    self.beginListeningIfPossible(preservingDraft: self.hasDraftUserSpeech)
                 }
             }
         case .failure:
@@ -170,11 +185,10 @@ final class VoiceSessionViewModel {
     }
 
     var canSendCurrentTurn: Bool {
-        recognizer.listening &&
         activeTurnTask == nil &&
         !isMuted &&
         !isEnding &&
-        !draftUserSpeech.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        hasDraftUserSpeech
     }
 
     func start() async {
@@ -213,7 +227,6 @@ final class VoiceSessionViewModel {
     func end() async {
         isEnding = true
         cancelMuteTransition()
-        cancelPendingAutoFinish()
         activeTurnTask?.cancel()
         activeTurnTask = nil
         recognizer.stopListening()
@@ -228,10 +241,8 @@ final class VoiceSessionViewModel {
         cancelMuteTransition()
         isMuted.toggle()
         if isMuted {
-            cancelPendingAutoFinish()
             recognizer.stopListening()
-            draftUserSpeech = ""
-            isAwaitingTurnCompletion = false
+            clearDraftUserSpeech()
             status = .muted
             controlSoundPlayer.play(.mute)
         } else {
@@ -241,12 +252,11 @@ final class VoiceSessionViewModel {
     }
 
     func interrupt() {
-        cancelPendingAutoFinish()
         recognizer.stopListening()
         playback.stop()
         assistantSpeechBuffer.removeAll(keepingCapacity: true)
         shouldResumeListeningAfterPlayback = false
-        isAwaitingTurnCompletion = false
+        clearDraftUserSpeech()
 
         if let activeTurnTask {
             Task {
@@ -275,12 +285,11 @@ final class VoiceSessionViewModel {
 
     func finishCurrentTurn() {
         guard canSendCurrentTurn else { return }
-        isAwaitingTurnCompletion = false
-        cancelPendingAutoFinish()
-        recognizer.finishListening()
+        recognizer.stopListening()
+        submitCurrentDraft()
     }
 
-    private func beginListeningIfPossible() {
+    private func beginListeningIfPossible(preservingDraft: Bool = false) {
         guard canListen else {
             if isMuted {
                 status = .muted
@@ -291,8 +300,12 @@ final class VoiceSessionViewModel {
         }
 
         latestErrorMessage = nil
-        draftUserSpeech = ""
-        isAwaitingTurnCompletion = false
+        if preservingDraft {
+            liveDraftSpeech = ""
+            syncDraftUserSpeech()
+        } else {
+            clearDraftUserSpeech()
+        }
         status = .listening
         recognizer.startListening()
     }
@@ -341,30 +354,119 @@ final class VoiceSessionViewModel {
     }
 
     private func handlePartialTranscript(_ text: String) {
-        draftUserSpeech = text
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            isAwaitingTurnCompletion = false
-            cancelPendingAutoFinish()
-            return
-        }
-
-        guard recognizer.listening else { return }
-        isAwaitingTurnCompletion = true
-        scheduleAutoFinish()
+        liveDraftSpeech = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        syncDraftUserSpeech()
     }
 
     private func handleFinalTranscript(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        isAwaitingTurnCompletion = false
-        guard !trimmed.isEmpty else {
-            draftUserSpeech = ""
+        liveDraftSpeech = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        syncDraftUserSpeech()
+
+        let combinedDraft = currentDraftUserSpeech
+        guard !combinedDraft.isEmpty else {
+            clearDraftUserSpeech()
             beginListeningIfPossible()
             return
         }
 
-        draftUserSpeech = ""
+        if let completedTurn = VoiceTurnEndCue.stripTrailingCue(from: combinedDraft) {
+            submitUserTurn(completedTurn)
+            return
+        }
+
+        commitLiveDraftSpeech()
+        beginListeningIfPossible(preservingDraft: true)
+    }
+
+    private func handleBridgeEvent(_ event: CodexBridgeEvent) {
+        switch event {
+        case .sessionReady(let sessionID, let cwd):
+            self.sessionID = sessionID ?? self.sessionID
+            if let cwd {
+                resolvedWorkspacePath = cwd
+            }
+        case .cwdResolved(let cwd):
+            resolvedWorkspacePath = cwd
+        case .processStarted:
+            break
+        case .assistantDelta(let text):
+            latestErrorMessage = nil
+            bufferAssistantDelta(text)
+            queueSpeechIfNeeded(force: false)
+            if playback.isSpeakingOrQueued {
+                status = .speaking
+            } else {
+                status = .processing
+            }
+        case .assistantDone:
+            didReceiveAssistantDone = true
+            queueSpeechIfNeeded(force: true)
+            if playback.isSpeakingOrQueued {
+                status = .speaking
+            } else {
+                beginListeningIfPossible()
+            }
+        case .toolStatus(let text):
+            appendTranscript(kind: .toolStatus, text: text)
+            if RelayPreferences.shared.voiceSpeaksToolStatus {
+                playback.speak(
+                    text,
+                    rate: Float(RelayPreferences.shared.voiceSpeechRate),
+                    kind: .toolStatus
+                )
+            }
+        case .error(let message, _):
+            latestErrorMessage = message
+            appendTranscript(kind: .system, text: message)
+            if !playback.isSpeakingOrQueued {
+                status = .failed(message)
+            }
+        }
+    }
+
+    private func bufferAssistantDelta(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let separator = assistantSpeechBuffer.isEmpty || trimmed.hasPrefix("\n") ? "" : " "
+        assistantSpeechBuffer += separator + trimmed
+    }
+
+    private func revealAssistantSpeech(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let lastIndex = transcript.lastIndex(where: { $0.kind == .assistant }),
+           lastIndex == transcript.indices.last {
+            let prefix = transcript[lastIndex].text.hasSuffix("\n") || trimmed.hasPrefix("\n") ? "" : " "
+            transcript[lastIndex].text += prefix + trimmed
+        } else {
+            transcript.append(VoiceTranscriptItem(kind: .assistant, text: trimmed))
+        }
+    }
+
+    private func appendTranscript(kind: VoiceTranscriptItem.Kind, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        transcript.append(VoiceTranscriptItem(kind: kind, text: trimmed))
+    }
+
+    private var currentDraftUserSpeech: String {
+        joinSpeechSegments(committedDraftSpeech, liveDraftSpeech)
+    }
+
+    private func submitCurrentDraft() {
+        let draft = VoiceTurnEndCue.stripTrailingCue(from: currentDraftUserSpeech) ?? currentDraftUserSpeech
+        let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDraft.isEmpty else { return }
+        submitUserTurn(trimmedDraft)
+    }
+
+    private func submitUserTurn(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        clearDraftUserSpeech()
         appendTranscript(kind: .user, text: trimmed)
         status = .processing
         shouldResumeListeningAfterPlayback = true
@@ -397,123 +499,88 @@ final class VoiceSessionViewModel {
         }
     }
 
-    private func scheduleAutoFinish() {
-        cancelPendingAutoFinish()
-        autoFinishTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: Self.automaticTurnFinishDelay)
-            } catch {
-                return
-            }
-
-            await MainActor.run {
-                guard let self else { return }
-                guard self.recognizer.listening else { return }
-                guard self.activeTurnTask == nil else { return }
-                guard !self.isMuted && !self.isEnding else { return }
-                guard !self.draftUserSpeech.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                self.finishCurrentTurn()
-            }
+    private func commitLiveDraftSpeech() {
+        let trimmedLiveDraft = liveDraftSpeech.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedLiveDraft.isEmpty {
+            committedDraftSpeech = joinSpeechSegments(committedDraftSpeech, trimmedLiveDraft)
         }
+        liveDraftSpeech = ""
+        syncDraftUserSpeech()
     }
 
-    private func cancelPendingAutoFinish() {
-        autoFinishTask?.cancel()
-        autoFinishTask = nil
+    private func clearDraftUserSpeech() {
+        committedDraftSpeech = ""
+        liveDraftSpeech = ""
+        draftUserSpeech = ""
     }
 
-    private func handleBridgeEvent(_ event: CodexBridgeEvent) {
-        switch event {
-        case .sessionReady(let sessionID, let cwd):
-            self.sessionID = sessionID ?? self.sessionID
-            if let cwd {
-                resolvedWorkspacePath = cwd
-            }
-        case .cwdResolved(let cwd):
-            resolvedWorkspacePath = cwd
-        case .processStarted:
-            break
-        case .assistantDelta(let text):
-            latestErrorMessage = nil
-            appendAssistantDelta(text)
-            queueSpeechIfNeeded(force: false)
-            if playback.isSpeakingOrQueued {
-                status = .speaking
-            } else {
-                status = .processing
-            }
-        case .assistantDone:
-            didReceiveAssistantDone = true
-            queueSpeechIfNeeded(force: true)
-            if playback.isSpeakingOrQueued {
-                status = .speaking
-            } else {
-                beginListeningIfPossible()
-            }
-        case .toolStatus(let text):
-            appendTranscript(kind: .toolStatus, text: text)
-            if RelayPreferences.shared.voiceSpeaksToolStatus {
-                playback.speak(text, rate: Float(RelayPreferences.shared.voiceSpeechRate))
-            }
-        case .error(let message, _):
-            latestErrorMessage = message
-            appendTranscript(kind: .system, text: message)
-            if !playback.isSpeakingOrQueued {
-                status = .failed(message)
-            }
+    private func syncDraftUserSpeech() {
+        draftUserSpeech = currentDraftUserSpeech
+    }
+
+    private func joinSpeechSegments(_ leading: String, _ trailing: String) -> String {
+        let trimmedLeading = leading.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTrailing = trailing.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch (trimmedLeading.isEmpty, trimmedTrailing.isEmpty) {
+        case (true, true):
+            return ""
+        case (true, false):
+            return trimmedTrailing
+        case (false, true):
+            return trimmedLeading
+        case (false, false):
+            return "\(trimmedLeading) \(trimmedTrailing)"
         }
-    }
-
-    private func appendAssistantDelta(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        if let lastIndex = transcript.lastIndex(where: { $0.kind == .assistant }),
-           lastIndex == transcript.indices.last {
-            let prefix = transcript[lastIndex].text.hasSuffix("\n") || trimmed.hasPrefix("\n") ? "" : " "
-            transcript[lastIndex].text += prefix + trimmed
-        } else {
-            transcript.append(VoiceTranscriptItem(kind: .assistant, text: trimmed))
-        }
-
-        let separator = assistantSpeechBuffer.isEmpty || trimmed.hasPrefix("\n") ? "" : " "
-        assistantSpeechBuffer += separator + trimmed
-    }
-
-    private func appendTranscript(kind: VoiceTranscriptItem.Kind, text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        transcript.append(VoiceTranscriptItem(kind: kind, text: trimmed))
     }
 
     private func queueSpeechIfNeeded(force: Bool) {
-        let candidate = speechChunkCandidate(from: assistantSpeechBuffer, force: force)
-        guard let candidate, !candidate.isEmpty else { return }
+        while let chunk = nextSpeechChunk(from: assistantSpeechBuffer, force: force) {
+            assistantSpeechBuffer.removeFirst(chunk.consumedCharacterCount)
+            assistantSpeechBuffer = assistantSpeechBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            playback.speak(
+                chunk.text,
+                rate: Float(RelayPreferences.shared.voiceSpeechRate),
+                kind: .assistant
+            )
 
-        let chunkLength = candidate.count
-        assistantSpeechBuffer.removeFirst(min(chunkLength, assistantSpeechBuffer.count))
-        assistantSpeechBuffer = assistantSpeechBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        playback.speak(candidate, rate: Float(RelayPreferences.shared.voiceSpeechRate))
+            if force {
+                break
+            }
+        }
     }
 
-    private func speechChunkCandidate(from buffer: String, force: Bool) -> String? {
-        let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+    private func nextSpeechChunk(from buffer: String, force: Bool) -> (text: String, consumedCharacterCount: Int)? {
+        guard let contentStart = buffer.firstIndex(where: { !$0.isWhitespace && !$0.isNewline }) else {
+            return nil
+        }
 
         if force {
-            return trimmed
+            let chunk = String(buffer[contentStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !chunk.isEmpty else { return nil }
+            return (chunk, buffer.count)
         }
 
+        let remaining = buffer[contentStart...]
         let delimiters = CharacterSet(charactersIn: ".!?\n")
-        if let range = trimmed.rangeOfCharacter(from: delimiters) {
-            return String(trimmed[..<range.upperBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let delimiterRange = remaining.rangeOfCharacter(from: delimiters) {
+            let chunk = String(buffer[contentStart..<delimiterRange.upperBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !chunk.isEmpty else { return nil }
+            let consumedCount = buffer.distance(from: buffer.startIndex, to: delimiterRange.upperBound)
+            return (chunk, consumedCount)
         }
 
-        if trimmed.count >= 140 {
-            return trimmed
-        }
+        let maxChunkLength = 140
+        let remainingCount = buffer.distance(from: contentStart, to: buffer.endIndex)
+        guard remainingCount >= maxChunkLength else { return nil }
 
-        return nil
+        let tentativeEnd = buffer.index(contentStart, offsetBy: maxChunkLength, limitedBy: buffer.endIndex) ?? buffer.endIndex
+        let prefix = buffer[contentStart..<tentativeEnd]
+        let chunkEnd = prefix.lastIndex(where: \.isWhitespace) ?? tentativeEnd
+        let chunk = String(buffer[contentStart..<chunkEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !chunk.isEmpty else { return nil }
+        let consumedCount = buffer.distance(from: buffer.startIndex, to: chunkEnd)
+        return (chunk, consumedCount)
     }
 
     private func authorizationMessage(for state: SpeechRecognizerService.AuthorizationState) -> String {

@@ -9,6 +9,11 @@ import AVFoundation
 
 @MainActor
 final class SpeechPlaybackService: NSObject {
+    enum UtteranceKind: Equatable {
+        case assistant
+        case toolStatus
+    }
+
     private enum CancellationBehavior {
         case none
         case advance
@@ -16,16 +21,20 @@ final class SpeechPlaybackService: NSObject {
     }
 
     private struct QueuedSpeech {
+        let kind: UtteranceKind
         let text: String
         let rate: Float
     }
 
     var onDidStartSpeaking: (() -> Void)?
     var onDidFinishQueue: (() -> Void)?
+    var onDidStartUtterance: ((UtteranceKind, String) -> Void)?
+    var onDidSkipUtterance: ((UtteranceKind, String) -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
     private var pendingSpeech: [QueuedSpeech] = []
     private var activeUtterance: AVSpeechUtterance?
+    private var activeSpeech: QueuedSpeech?
     private var cancellationBehavior: CancellationBehavior = .none
 
     override init() {
@@ -41,11 +50,11 @@ final class SpeechPlaybackService: NSObject {
         activeUtterance != nil || !pendingSpeech.isEmpty
     }
 
-    func speak(_ text: String, rate: Float) {
+    func speak(_ text: String, rate: Float, kind: UtteranceKind) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        pendingSpeech.append(QueuedSpeech(text: trimmed, rate: rate))
+        pendingSpeech.append(QueuedSpeech(kind: kind, text: trimmed, rate: rate))
         startNextUtteranceIfNeeded()
     }
 
@@ -58,7 +67,8 @@ final class SpeechPlaybackService: NSObject {
             return
         }
 
-        pendingSpeech.removeFirst()
+        let skippedSpeech = pendingSpeech.removeFirst()
+        onDidSkipUtterance?(skippedSpeech.kind, skippedSpeech.text)
         startNextUtteranceIfNeeded()
         if !isSpeakingOrQueued {
             onDidFinishQueue?()
@@ -88,13 +98,15 @@ final class SpeechPlaybackService: NSObject {
         let nextSpeech = pendingSpeech.removeFirst()
         let utterance = AVSpeechUtterance(string: nextSpeech.text)
         utterance.rate = nextSpeech.rate
-        utterance.prefersAssistiveTechnologySettings = true
+        utterance.prefersAssistiveTechnologySettings = false
         activeUtterance = utterance
+        activeSpeech = nextSpeech
         synthesizer.speak(utterance)
     }
 
     private func handleUtteranceCompletion() {
         activeUtterance = nil
+        activeSpeech = nil
 
         let behavior = cancellationBehavior
         cancellationBehavior = .none
@@ -113,6 +125,9 @@ final class SpeechPlaybackService: NSObject {
 
 extension SpeechPlaybackService: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        if let activeSpeech {
+            onDidStartUtterance?(activeSpeech.kind, activeSpeech.text)
+        }
         onDidStartSpeaking?()
     }
 

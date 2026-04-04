@@ -142,8 +142,12 @@ private final class TerminalWorkspaceViewModel {
             return tabs.isEmpty
         }
 
-        tabs.remove(at: index)
+        let closingTab = tabs.remove(at: index)
         isShowingNewTabPicker = false
+
+        Task {
+            await closingTab.sessionViewModel.disconnect()
+        }
 
         guard !tabs.isEmpty else {
             return true
@@ -203,17 +207,16 @@ private struct TerminalTabStrip: View {
                 }
 
                 Button(action: onNewTab) {
-                    Label("New Tab", systemImage: "plus")
-                        .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13, bold: true))
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(palette.accentColor)
-                        .padding(.horizontal, 14)
-                        .frame(height: 42)
+                        .frame(width: 32, height: 32)
                         .background(
-                            Capsule(style: .continuous)
+                            Circle()
                                 .fill(palette.accentColor.opacity(0.12))
                         )
                         .overlay(
-                            Capsule(style: .continuous)
+                            Circle()
                                 .stroke(palette.accentColor.opacity(0.4), lineWidth: 1)
                         )
                 }
@@ -221,7 +224,7 @@ private struct TerminalTabStrip: View {
                 .accessibilityLabel("Open new terminal tab")
             }
             .padding(.horizontal, RelayTheme.Spacing.content)
-            .padding(.vertical, RelayTheme.Spacing.compact)
+            .padding(.vertical, RelayTheme.Spacing.tight)
         }
         .background(palette.surfaceColor)
     }
@@ -258,17 +261,17 @@ private struct TerminalTabChip: View {
                 HStack(spacing: RelayTheme.Spacing.tight) {
                     Circle()
                         .fill(statusColor)
-                        .frame(width: 8, height: 8)
+                        .frame(width: 7, height: 7)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13, bold: true))
-                            .foregroundStyle(isSelected ? palette.textColor : palette.mutedColor)
-                            .lineLimit(1)
+                    Text(title)
+                        .font(TerminalFontRegistry.terminalSwiftUIFont(size: 12, bold: true))
+                        .foregroundStyle(isSelected ? palette.textColor : palette.mutedColor)
+                        .lineLimit(1)
 
+                    if isSelected {
                         Text(subtitle)
                             .font(TerminalFontRegistry.terminalSwiftUIFont(size: 11))
-                            .foregroundStyle(isSelected ? palette.mutedColor : palette.mutedColor.opacity(0.9))
+                            .foregroundStyle(palette.mutedColor)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -279,9 +282,9 @@ private struct TerminalTabChip: View {
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(isSelected ? palette.textColor : palette.mutedColor)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 18, height: 18)
                     .background(
                         Circle()
                             .fill((isSelected ? palette.textColor : palette.mutedColor).opacity(0.08))
@@ -290,16 +293,16 @@ private struct TerminalTabChip: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Close \(title) tab")
         }
-        .padding(.vertical, 10)
-        .padding(.leading, 12)
-        .padding(.trailing, 10)
-        .frame(width: 220, alignment: .leading)
+        .padding(.vertical, 7)
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+        .frame(minWidth: isSelected ? 196 : 120, maxWidth: isSelected ? 220 : 150, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(isSelected ? palette.raisedColor : palette.backgroundColor)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(
                     isSelected ? palette.accentColor.opacity(0.5) : palette.subtleColor.opacity(0.78),
                     lineWidth: 1
