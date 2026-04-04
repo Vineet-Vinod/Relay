@@ -12,7 +12,7 @@ import UIKit
 struct TerminalView: View {
     @Environment(\.colorScheme) private var colorScheme
 
-    @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = 14.0
+    @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = RelayTerminalFontSizePreference.defaultSize
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
@@ -32,7 +32,7 @@ struct TerminalView: View {
             SSHTerminalSurface(
                 bridge: terminalBridge,
                 palette: palette,
-                fontSize: CGFloat(terminalFontSize),
+                fontSize: $terminalFontSize,
                 bellBehavior: resolvedBellBehavior,
                 onSend: { data in
                     Task {
@@ -379,25 +379,25 @@ private final class RelayTerminalBridge {
         guard !bytes.isEmpty else { return }
 
         if let terminalView {
-            terminalView.feed(byteArray: ArraySlice(bytes))
+            terminalView.feedRelayOutput(byteArray: ArraySlice(bytes))
         } else {
             pendingOutput.append(bytes)
         }
     }
 
     func focus() {
-        terminalView?.becomeFirstResponder()
+        _ = terminalView?.becomeFirstResponder()
     }
 
     func reset() {
         pendingOutput.removeAll()
-        terminalView?.feed(text: "\u{001B}c")
+        terminalView?.feedRelayOutput(text: "\u{001B}c")
     }
 
     private func flushPendingOutput() {
         guard let terminalView, !pendingOutput.isEmpty else { return }
         for bytes in pendingOutput {
-            terminalView.feed(byteArray: ArraySlice(bytes))
+            terminalView.feedRelayOutput(byteArray: ArraySlice(bytes))
         }
         pendingOutput.removeAll()
     }
@@ -406,17 +406,26 @@ private final class RelayTerminalBridge {
 private struct SSHTerminalSurface: UIViewRepresentable {
     let bridge: RelayTerminalBridge
     let palette: RelayTerminalPalette
-    let fontSize: CGFloat
+    @Binding var fontSize: Double
     let bellBehavior: RelayBellBehavior
     let onSend: (ArraySlice<UInt8>) -> Void
     let onResize: (Int, Int) -> Void
 
     func makeUIView(context: Context) -> RelayTerminalHostView {
+        let fontSizeBinding = _fontSize
         let view = RelayTerminalHostView(frame: .zero)
         view.relayBridge = bridge
-        view.configure(onSend: onSend, onResize: onResize)
+        view.configure(
+            onSend: onSend,
+            onResize: onResize,
+            onFontSizeChange: { updatedFontSize in
+                let clampedSize = RelayTerminalFontSizePreference.clamp(Double(updatedFontSize))
+                guard abs(fontSizeBinding.wrappedValue - clampedSize) > 0.01 else { return }
+                fontSizeBinding.wrappedValue = clampedSize
+            }
+        )
         view.applyPalette(palette)
-        view.applyPreferences(fontSize: fontSize, bellBehavior: bellBehavior)
+        view.applyPreferences(fontSize: CGFloat(RelayTerminalFontSizePreference.clamp(fontSize)), bellBehavior: bellBehavior)
         bridge.attach(view)
         DispatchQueue.main.async {
             _ = view.becomeFirstResponder()
@@ -425,10 +434,19 @@ private struct SSHTerminalSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: RelayTerminalHostView, context: Context) {
+        let fontSizeBinding = _fontSize
         uiView.relayBridge = bridge
-        uiView.configure(onSend: onSend, onResize: onResize)
+        uiView.configure(
+            onSend: onSend,
+            onResize: onResize,
+            onFontSizeChange: { updatedFontSize in
+                let clampedSize = RelayTerminalFontSizePreference.clamp(Double(updatedFontSize))
+                guard abs(fontSizeBinding.wrappedValue - clampedSize) > 0.01 else { return }
+                fontSizeBinding.wrappedValue = clampedSize
+            }
+        )
         uiView.applyPalette(palette)
-        uiView.applyPreferences(fontSize: fontSize, bellBehavior: bellBehavior)
+        uiView.applyPreferences(fontSize: CGFloat(RelayTerminalFontSizePreference.clamp(fontSize)), bellBehavior: bellBehavior)
         bridge.attach(uiView)
     }
 
@@ -437,19 +455,353 @@ private struct SSHTerminalSurface: UIViewRepresentable {
     }
 }
 
-private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewDelegate {
+private struct RelayGitCommandTemplate: Identifiable {
+    let id: String
+    let title: String
+    let command: String
+    let trailingCursorLeftMoves: Int
+    let symbolName: String
+
+    static let all: [RelayGitCommandTemplate] = [
+        RelayGitCommandTemplate(
+            id: "status",
+            title: "git status",
+            command: "git status",
+            trailingCursorLeftMoves: 0,
+            symbolName: "list.bullet.rectangle"
+        ),
+        RelayGitCommandTemplate(
+            id: "diff",
+            title: "git diff",
+            command: "git diff",
+            trailingCursorLeftMoves: 0,
+            symbolName: "doc.text.magnifyingglass"
+        ),
+        RelayGitCommandTemplate(
+            id: "add-dot",
+            title: "git add .",
+            command: "git add .",
+            trailingCursorLeftMoves: 0,
+            symbolName: "plus.square.on.square"
+        ),
+        RelayGitCommandTemplate(
+            id: "add-path",
+            title: "git add ...",
+            command: "git add ",
+            trailingCursorLeftMoves: 0,
+            symbolName: "plus.rectangle.on.folder"
+        ),
+        RelayGitCommandTemplate(
+            id: "commit-message",
+            title: "git commit -m \"\"",
+            command: "git commit -m \"\"",
+            trailingCursorLeftMoves: 1,
+            symbolName: "text.quote"
+        ),
+        RelayGitCommandTemplate(
+            id: "pull-rebase",
+            title: "git pull --rebase",
+            command: "git pull --rebase",
+            trailingCursorLeftMoves: 0,
+            symbolName: "arrow.down.circle"
+        ),
+        RelayGitCommandTemplate(
+            id: "push",
+            title: "git push",
+            command: "git push",
+            trailingCursorLeftMoves: 0,
+            symbolName: "arrow.up.circle"
+        ),
+        RelayGitCommandTemplate(
+            id: "switch",
+            title: "git switch ...",
+            command: "git switch ",
+            trailingCursorLeftMoves: 0,
+            symbolName: "arrow.triangle.branch"
+        ),
+        RelayGitCommandTemplate(
+            id: "switch-create",
+            title: "git switch -c ...",
+            command: "git switch -c ",
+            trailingCursorLeftMoves: 0,
+            symbolName: "arrow.triangle.branch"
+        ),
+        RelayGitCommandTemplate(
+            id: "log",
+            title: "git log --oneline --graph --decorate -20",
+            command: "git log --oneline --graph --decorate -20",
+            trailingCursorLeftMoves: 0,
+            symbolName: "clock.arrow.trianglehead.counterclockwise.rotate.90"
+        ),
+    ]
+}
+
+private enum RelayTerminalAccessoryAction: CaseIterable {
+    case tab
+    case escape
+    case control
+    case git
+
+    var title: String {
+        switch self {
+        case .tab:
+            return "Tab"
+        case .escape:
+            return "Esc"
+        case .control:
+            return "Ctrl"
+        case .git:
+            return "Git"
+        }
+    }
+}
+
+private final class RelayTerminalAccessoryButton: UIButton {
+    let action: RelayTerminalAccessoryAction
+
+    init(action: RelayTerminalAccessoryAction) {
+        self.action = action
+        super.init(frame: .zero)
+
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = action.title
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+        configuration.cornerStyle = .fixed
+        configuration.background.cornerRadius = 12
+
+        self.configuration = configuration
+        titleLabel?.font = TerminalFontRegistry.terminalFont(size: 13, bold: true)
+        titleLabel?.adjustsFontSizeToFitWidth = true
+        titleLabel?.minimumScaleFactor = 0.82
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 36).isActive = true
+        widthAnchor.constraint(greaterThanOrEqualToConstant: minimumWidth(for: action)).isActive = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func applyPalette(_ palette: RelayTerminalPalette, isSelected: Bool) {
+        let background = isSelected ? palette.accent.withAlphaComponent(0.18) : palette.raised
+        let border = isSelected ? palette.accent.withAlphaComponent(0.72) : palette.subtle.withAlphaComponent(0.82)
+
+        var configuration = configuration ?? UIButton.Configuration.plain()
+        var backgroundConfiguration = configuration.background
+        configuration.baseForegroundColor = isSelected ? palette.accent : palette.text
+        backgroundConfiguration.backgroundColor = background
+        backgroundConfiguration.strokeColor = border
+        backgroundConfiguration.strokeWidth = 1
+        configuration.background = backgroundConfiguration
+        self.configuration = configuration
+    }
+
+    private func minimumWidth(for action: RelayTerminalAccessoryAction) -> CGFloat {
+        switch action {
+        case .git:
+            return 68
+        default:
+            return 54
+        }
+    }
+}
+
+private final class RelayTerminalAccessoryView: UIInputView, UIInputViewAudioFeedback {
+    weak var terminalView: RelayTerminalHostView?
+
+    private let borderView = UIView()
+    private let scrollView = UIScrollView()
+    private let stackView = UIStackView()
+    private var buttons: [RelayTerminalAccessoryAction: RelayTerminalAccessoryButton] = [:]
+    private var controlResetObserver: NSObjectProtocol?
+
+    init(terminalView: RelayTerminalHostView) {
+        self.terminalView = terminalView
+        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 56), inputViewStyle: .keyboard)
+        allowsSelfSizing = true
+        setupUI()
+        observeControlReset()
+        applyPalette(RelayTerminalPalette.palette(for: traitCollection))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let controlResetObserver {
+            NotificationCenter.default.removeObserver(controlResetObserver)
+        }
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: 56)
+    }
+
+    var enableInputClicksWhenVisible: Bool { true }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else {
+            return
+        }
+
+        applyPalette(RelayTerminalPalette.palette(for: traitCollection))
+    }
+
+    func applyPalette(_ palette: RelayTerminalPalette) {
+        backgroundColor = palette.surface
+        borderView.backgroundColor = palette.subtle.withAlphaComponent(0.9)
+
+        for (action, button) in buttons {
+            let isSelected = action == .control && (terminalView?.controlModifier ?? false)
+            button.applyPalette(palette, isSelected: isSelected)
+        }
+
+        scrollView.indicatorStyle = traitCollection.userInterfaceStyle == .dark ? .white : .black
+    }
+
+    private func setupUI() {
+        translatesAutoresizingMaskIntoConstraints = false
+        autoresizingMask = .flexibleHeight
+
+        borderView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(borderView)
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.alwaysBounceHorizontal = true
+        addSubview(scrollView)
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.spacing = RelayTheme.Spacing.tight
+        scrollView.addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 56),
+            borderView.topAnchor.constraint(equalTo: topAnchor),
+            borderView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            borderView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            borderView.heightAnchor.constraint(equalToConstant: 1),
+            scrollView.topAnchor.constraint(equalTo: topAnchor, constant: RelayTheme.Spacing.tight),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -RelayTheme.Spacing.micro),
+            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: RelayTheme.Spacing.compact),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -RelayTheme.Spacing.compact),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            stackView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+        ])
+
+        RelayTerminalAccessoryAction.allCases.forEach { action in
+            let button = RelayTerminalAccessoryButton(action: action)
+            buttons[action] = button
+            stackView.addArrangedSubview(button)
+
+            if action == .git {
+                button.showsMenuAsPrimaryAction = true
+                button.menu = makeGitMenu()
+            } else {
+                button.addTarget(self, action: #selector(handleButtonTap(_:)), for: .touchUpInside)
+            }
+        }
+    }
+
+    private func observeControlReset() {
+        guard let terminalView else { return }
+
+        controlResetObserver = NotificationCenter.default.addObserver(
+            forName: .terminalViewControlModifierReset,
+            object: terminalView,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.applyPalette(RelayTerminalPalette.palette(for: self.traitCollection))
+        }
+    }
+
+    private func makeGitMenu() -> UIMenu {
+        UIMenu(
+            title: "Git Commands",
+            children: RelayGitCommandTemplate.all.map { template in
+                UIAction(
+                    title: template.title,
+                    image: UIImage(systemName: template.symbolName)
+                ) { [weak self] _ in
+                    guard let self, let terminalView else { return }
+
+                    #if os(iOS)
+                    UIDevice.current.playInputClick()
+                    #endif
+
+                    _ = terminalView.becomeFirstResponder()
+                    terminalView.insertCommandTemplate(template)
+                    self.applyPalette(RelayTerminalPalette.palette(for: self.traitCollection))
+                }
+            }
+        )
+    }
+
+    @objc
+    private func handleButtonTap(_ sender: RelayTerminalAccessoryButton) {
+        perform(action: sender.action)
+    }
+
+    private func perform(action: RelayTerminalAccessoryAction) {
+        guard let terminalView else { return }
+
+        #if os(iOS)
+        UIDevice.current.playInputClick()
+        #endif
+
+        _ = terminalView.becomeFirstResponder()
+
+        switch action {
+        case .tab:
+            terminalView.sendAccessoryBytes([0x09])
+        case .escape:
+            terminalView.sendAccessoryBytes([0x1B])
+        case .control:
+            terminalView.controlModifier.toggle()
+        case .git:
+            break
+        }
+
+        applyPalette(RelayTerminalPalette.palette(for: traitCollection))
+    }
+}
+
+private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewDelegate, UIGestureRecognizerDelegate {
     weak var relayBridge: RelayTerminalBridge?
 
     private var onSend: ((ArraySlice<UInt8>) -> Void)?
     private var onResize: ((Int, Int) -> Void)?
+    private var onFontSizeChange: ((CGFloat) -> Void)?
     private var configuredFontSize: CGFloat?
     private var bellBehavior: RelayBellBehavior = .haptic
+    private weak var relayAccessoryView: RelayTerminalAccessoryView?
+    private var pinchBaseFontSize: CGFloat?
+    private lazy var relayPinchGestureRecognizer: UIPinchGestureRecognizer = {
+        let recognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchZoom(_:)))
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        return recognizer
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         terminalDelegate = self
-        applyPreferences(fontSize: 14, bellBehavior: .haptic)
+        applyPreferences(fontSize: CGFloat(RelayTerminalFontSizePreference.defaultSize), bellBehavior: .haptic)
         optionAsMetaKey = false
+        configureKeyboardTraits()
+        installRelayAccessory()
+        addGestureRecognizer(relayPinchGestureRecognizer)
         applyPalette(RelayTerminalPalette.palette(for: traitCollection))
     }
 
@@ -470,25 +822,44 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
 
     func configure(
         onSend: @escaping (ArraySlice<UInt8>) -> Void,
-        onResize: @escaping (Int, Int) -> Void
+        onResize: @escaping (Int, Int) -> Void,
+        onFontSizeChange: ((CGFloat) -> Void)? = nil
     ) {
         self.onSend = onSend
         self.onResize = onResize
+        self.onFontSizeChange = onFontSizeChange
     }
 
     func applyPreferences(fontSize: CGFloat, bellBehavior: RelayBellBehavior) {
         self.bellBehavior = bellBehavior
 
-        guard configuredFontSize != fontSize else { return }
-        configuredFontSize = fontSize
+        let clampedFontSize = RelayTerminalFontSizePreference.clamp(fontSize)
+        guard configuredFontSize != clampedFontSize else { return }
+
+        let preservedScrollPosition = scrollPosition
+        configuredFontSize = clampedFontSize
         setFonts(
-            normal: TerminalFontRegistry.terminalFont(size: fontSize, bold: false),
-            bold: TerminalFontRegistry.terminalFont(size: fontSize, bold: true),
-            italic: TerminalFontRegistry.terminalFont(size: fontSize, bold: false),
-            boldItalic: TerminalFontRegistry.terminalFont(size: fontSize, bold: true)
+            normal: TerminalFontRegistry.terminalFont(size: clampedFontSize, bold: false),
+            bold: TerminalFontRegistry.terminalFont(size: clampedFontSize, bold: true),
+            italic: TerminalFontRegistry.terminalFont(size: clampedFontSize, bold: false),
+            boldItalic: TerminalFontRegistry.terminalFont(size: clampedFontSize, bold: true)
         )
         setNeedsLayout()
+        layoutIfNeeded()
+        scroll(toPosition: preservedScrollPosition)
         setNeedsDisplay()
+    }
+
+    func feedRelayOutput(byteArray: ArraySlice<UInt8>) {
+        let preservedScrollPosition = scrollPosition
+        feed(byteArray: byteArray)
+        scroll(toPosition: preservedScrollPosition)
+    }
+
+    func feedRelayOutput(text: String) {
+        let preservedScrollPosition = scrollPosition
+        feed(text: text)
+        scroll(toPosition: preservedScrollPosition)
     }
 
     func applyPalette(_ palette: RelayTerminalPalette) {
@@ -497,7 +868,25 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
         caretColor = palette.accent
         backgroundColor = palette.background
         tintColor = palette.accent
+        relayAccessoryView?.applyPalette(palette)
         setNeedsDisplay()
+    }
+
+    func sendAccessoryBytes(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        controlModifier = false
+        send(bytes)
+    }
+
+    func insertCommandTemplate(_ template: RelayGitCommandTemplate) {
+        sendAccessoryBytes(Array(template.command.utf8))
+
+        if template.trailingCursorLeftMoves > 0 {
+            let moveLeft = Array("\u{001B}[D".utf8)
+            for _ in 0..<template.trailingCursorLeftMoves {
+                sendAccessoryBytes(moveLeft)
+            }
+        }
     }
 
     func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
@@ -541,6 +930,10 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
 
     func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {}
 
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === relayPinchGestureRecognizer
+    }
+
     private func flashBell() {
         let overlay = UIView(frame: bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -559,4 +952,49 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
             })
         })
     }
+
+    private func installRelayAccessory() {
+        let accessoryView = RelayTerminalAccessoryView(terminalView: self)
+        relayAccessoryView = accessoryView
+        inputAccessoryView = accessoryView
+    }
+
+    @objc
+    private func handlePinchZoom(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            pinchBaseFontSize = configuredFontSize ?? CGFloat(RelayTerminalFontSizePreference.defaultSize)
+            _ = becomeFirstResponder()
+        case .changed:
+            guard let pinchBaseFontSize else { return }
+            updateZoomFontSize(to: pinchBaseFontSize * recognizer.scale)
+        case .ended, .cancelled, .failed:
+            if let pinchBaseFontSize {
+                updateZoomFontSize(to: pinchBaseFontSize * recognizer.scale)
+            }
+            pinchBaseFontSize = nil
+        default:
+            break
+        }
+    }
+
+    private func configureKeyboardTraits() {
+        autocorrectionType = .no
+        spellCheckingType = .no
+        smartQuotesType = .no
+        smartDashesType = .no
+        smartInsertDeleteType = .no
+        autocapitalizationType = .none
+        inputAssistantItem.leadingBarButtonGroups = []
+        inputAssistantItem.trailingBarButtonGroups = []
+    }
+
+    private func updateZoomFontSize(to proposedSize: CGFloat) {
+        let clampedSize = RelayTerminalFontSizePreference.clamp(proposedSize)
+        guard abs((configuredFontSize ?? 0) - clampedSize) > 0.01 else { return }
+
+        applyPreferences(fontSize: clampedSize, bellBehavior: bellBehavior)
+        onFontSizeChange?(clampedSize)
+    }
+
 }

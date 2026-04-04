@@ -14,7 +14,7 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.useSavedKeysAutomatically) private var usesSavedKeysAutomatically = true
     @AppStorage(RelayDefaultsKey.allowPasswordFallback) private var allowsPasswordFallback = true
     @AppStorage(RelayDefaultsKey.connectionTimeoutSeconds) private var connectionTimeoutSeconds = 12
-    @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = 14.0
+    @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = RelayTerminalFontSizePreference.defaultSize
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
@@ -100,10 +100,10 @@ struct SettingsView: View {
             }
 
             Section {
-                Stepper(value: $terminalFontSize, in: 11.0...22.0, step: 1.0) {
+                Stepper(value: terminalFontSizeStepperBinding, in: RelayTerminalFontSizePreference.minimum...RelayTerminalFontSizePreference.maximum, step: 1.0) {
                     settingsValueRow(
                         title: "Font Size",
-                        value: "\(Int(terminalFontSize.rounded())) pt",
+                        value: terminalFontSizeLabel,
                         detail: nil
                     )
                 }
@@ -306,6 +306,24 @@ struct SettingsView: View {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "\(version) (\(build))"
+    }
+
+    private var terminalFontSizeStepperBinding: Binding<Double> {
+        Binding(
+            get: { RelayTerminalFontSizePreference.clamp(terminalFontSize).rounded() },
+            set: { terminalFontSize = RelayTerminalFontSizePreference.clamp($0.rounded()) }
+        )
+    }
+
+    private var terminalFontSizeLabel: String {
+        let clampedSize = RelayTerminalFontSizePreference.clamp(terminalFontSize)
+        let roundedSize = clampedSize.rounded()
+
+        if abs(clampedSize - roundedSize) < 0.05 {
+            return "\(Int(roundedSize)) pt"
+        }
+
+        return "\(clampedSize.formatted(.number.precision(.fractionLength(1)))) pt"
     }
 
     private func overviewMetric(title: String, value: String) -> some View {

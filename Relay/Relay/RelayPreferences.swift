@@ -5,6 +5,7 @@
 //  Created by Codex on 4/4/26.
 //
 
+import CoreGraphics
 import Foundation
 
 enum RelayDefaultsKey {
@@ -25,6 +26,20 @@ enum RelayDefaultsKey {
         keepScreenAwake,
         automaticallyReconnect,
     ]
+}
+
+enum RelayTerminalFontSizePreference {
+    static let minimum: Double = 11
+    static let maximum: Double = 22
+    static let defaultSize: Double = 14
+
+    static func clamp(_ value: Double) -> Double {
+        min(max(value, minimum), maximum)
+    }
+
+    static func clamp(_ value: CGFloat) -> CGFloat {
+        CGFloat(clamp(Double(value)))
+    }
 }
 
 enum RelayBellBehavior: String, CaseIterable, Identifiable {
@@ -70,8 +85,8 @@ struct RelayPreferences {
     }
 
     var terminalFontSize: Double {
-        let storedValue = defaults.object(forKey: RelayDefaultsKey.terminalFontSize) as? Double ?? 14
-        return min(max(storedValue, 11), 22)
+        let storedValue = defaults.object(forKey: RelayDefaultsKey.terminalFontSize) as? Double ?? RelayTerminalFontSizePreference.defaultSize
+        return RelayTerminalFontSizePreference.clamp(storedValue)
     }
 
     var bellBehavior: RelayBellBehavior {
@@ -101,7 +116,7 @@ struct RelayPreferences {
             RelayDefaultsKey.useSavedKeysAutomatically: true,
             RelayDefaultsKey.allowPasswordFallback: true,
             RelayDefaultsKey.connectionTimeoutSeconds: 12,
-            RelayDefaultsKey.terminalFontSize: 14.0,
+            RelayDefaultsKey.terminalFontSize: RelayTerminalFontSizePreference.defaultSize,
             RelayDefaultsKey.bellBehavior: RelayBellBehavior.haptic.rawValue,
             RelayDefaultsKey.keepScreenAwake: true,
             RelayDefaultsKey.automaticallyReconnect: true,
