@@ -20,23 +20,54 @@ struct TerminalLine: Identifiable, Equatable {
     }
 }
 
+@MainActor
 protocol SSHClient {
     func connect(to host: Host) async throws
     func execute(_ command: String) async throws -> String
     func disconnect() async
 }
 
+enum SSHTransportMode {
+    case mock
+    case real
+}
+
+enum SSHClientFactory {
+    @MainActor
+    static func makeClient() -> SSHClient {
+        switch AppEnvironment.sshTransportMode {
+        case .mock:
+            MockSSHClient()
+        case .real:
+            RealSSHClient()
+        }
+    }
+}
+
 enum SSHClientError: LocalizedError {
     case emptyCommand
+    case missingPassword
+    case notConnected
+    case invalidChannelType
+    case commandDidNotReturnOutput
 
     var errorDescription: String? {
         switch self {
         case .emptyCommand:
             "Enter a command to run."
+        case .missingPassword:
+            "No SSH password is configured for this device."
+        case .notConnected:
+            "No active SSH session."
+        case .invalidChannelType:
+            "The SSH server returned an unexpected channel type."
+        case .commandDidNotReturnOutput:
+            "The SSH command completed without returning output."
         }
     }
 }
 
+@MainActor
 final class MockSSHClient: SSHClient {
     private var activeHost: Host?
 
@@ -47,7 +78,7 @@ final class MockSSHClient: SSHClient {
 
     func execute(_ command: String) async throws -> String {
         guard let activeHost else {
-            return "No active session."
+            throw SSHClientError.notConnected
         }
 
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -81,6 +112,3 @@ final class MockSSHClient: SSHClient {
         activeHost = nil
     }
 }
-
-// Replace this with a real SSH transport backed by SwiftNIO SSH, libssh2, or
-// another iOS-compatible client library once package integration is in place.

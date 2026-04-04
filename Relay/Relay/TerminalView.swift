@@ -101,6 +101,20 @@ struct TerminalView: View {
 
 #Preview {
     NavigationStack {
-        TerminalView(viewModel: TerminalSessionViewModel(host: Host.samples[0]))
+        TerminalView(
+            viewModel: TerminalSessionViewModel(
+                host: Host(
+                    peer: PeerDevice(
+                        name: "Ryan MacBook Pro",
+                        networkAddress: "192.168.1.25",
+                        sshUsername: "ryan",
+                        sshPassword: "REPLACE_WITH_MAC_PASSWORD",
+                        isOnline: true,
+                        operatingSystem: "macOS",
+                        ownerName: "Ryan Baker"
+                    )
+                )
+            )
+        )
     }
 }

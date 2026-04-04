@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6A0100012F81500000463020 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = 6A0100032F81500000463020 /* NIOSSH */; };
+		6A0100022F81500000463020 /* NIOTransportServices in Frameworks */ = {isa = PBXBuildFile; productRef = 6A0100042F81500000463020 /* NIOTransportServices */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		3792B0C42F8148F100463020 /* Relay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Relay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +28,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6A0100012F81500000463020 /* NIOSSH in Frameworks */,
+				6A0100022F81500000463020 /* NIOTransportServices in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +72,8 @@
 			);
 			name = Relay;
 			packageProductDependencies = (
+				6A0100032F81500000463020 /* NIOSSH */,
+				6A0100042F81500000463020 /* NIOTransportServices */,
 			);
 			productName = Relay;
 			productReference = 3792B0C42F8148F100463020 /* Relay.app */;
@@ -94,6 +103,10 @@
 			);
 			mainGroup = 3792B0BB2F8148F100463020;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6A0100052F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
+				6A0100062F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3792B0C52F8148F100463020 /* Products */;
 			projectDirPath = "";
@@ -123,6 +136,38 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		6A0100052F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-ssh.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.12.0;
+			};
+		};
+		6A0100062F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-transport-services.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.26.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6A0100032F81500000463020 /* NIOSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6A0100052F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
+		};
+		6A0100042F81500000463020 /* NIOTransportServices */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6A0100062F81500000463020 /* XCRemoteSwiftPackageReference "swift-nio-transport-services" */;
+			productName = NIOTransportServices;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		3792B0CD2F8148F200463020 /* Debug */ = {

@@ -13,26 +13,33 @@ struct Host: Identifiable, Hashable, Codable {
     var hostname: String
     var port: Int
     var username: String
+    var password: String?
 
     init(
         id: UUID = UUID(),
         name: String,
         hostname: String,
         port: Int = 22,
-        username: String
+        username: String,
+        password: String? = nil
     ) {
         self.id = id
         self.name = name
         self.hostname = hostname
         self.port = port
         self.username = username
+        self.password = password
     }
 }
 
 extension Host {
-    static let samples = [
-        Host(name: "Production", hostname: "prod.example.com", username: "deploy"),
-        Host(name: "Staging", hostname: "staging.example.com", username: "deploy"),
-        Host(name: "Lab", hostname: "192.168.1.40", username: "ryan"),
-    ]
+    init(peer: PeerDevice, port: Int = 22) {
+        self.init(
+            name: peer.name,
+            hostname: peer.networkAddress,
+            port: port,
+            username: peer.sshUsername,
+            password: peer.sshPassword
+        )
+    }
 }

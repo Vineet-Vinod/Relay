@@ -8,11 +8,11 @@
 import SwiftUI
 
 struct ContentView: View {
-    private let store = HostStore()
+    private let meshService = MockMeshServiceClient()
 
     var body: some View {
         NavigationStack {
-            HostListView(store: store)
+            HostListView(service: meshService)
         }
     }
 }

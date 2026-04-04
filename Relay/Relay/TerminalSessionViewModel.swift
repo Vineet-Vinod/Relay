@@ -23,7 +23,7 @@ final class TerminalSessionViewModel {
 
     init(host: Host, client: SSHClient? = nil) {
         self.host = host
-        self.client = client ?? MockSSHClient()
+        self.client = client ?? SSHClientFactory.makeClient()
     }
 
     func connect() async {
@@ -36,7 +36,10 @@ final class TerminalSessionViewModel {
             try await client.connect(to: host)
             isConnected = true
             append("Connected.", kind: .status)
-            append("Type `help` to see mock commands.", kind: .status)
+
+            if AppEnvironment.sshTransportMode == .mock {
+                append("Type `help` to see mock commands.", kind: .status)
+            }
         } catch {
             append(error.localizedDescription, kind: .error)
         }
