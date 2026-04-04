@@ -52,7 +52,7 @@ struct SettingsView: View {
                     settingsValueRow(
                         title: "Connection Timeout",
                         value: "\(connectionTimeoutSeconds)s",
-                        detail: "Applies to SSH connect and key setup."
+                        detail: nil
                     )
                 }
             } header: {
@@ -104,7 +104,7 @@ struct SettingsView: View {
                     settingsValueRow(
                         title: "Font Size",
                         value: "\(Int(terminalFontSize.rounded())) pt",
-                        detail: "Applied to new terminal sessions."
+                        detail: nil
                     )
                 }
 
@@ -260,7 +260,16 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(uiColor: .systemBackground))
+            )
 
             HStack(spacing: RelayTheme.Spacing.compact) {
                 overviewMetric(title: "Devices", value: "\(savedDevices.count)")
@@ -304,11 +313,14 @@ struct SettingsView: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
             Text(value)
                 .font(.title3.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 72, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(
