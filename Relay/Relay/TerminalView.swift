@@ -10,31 +10,22 @@ import SwiftUI
 import UIKit
 
 struct TerminalView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @State var viewModel: TerminalSessionViewModel
     @State private var terminalBridge = RelayTerminalBridge()
     @State private var isShowingPasswordSheet = false
     @State private var pendingReconnectHost: Host?
+    @State private var didAttemptConnection = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !viewModel.messages.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(viewModel.messages) { message in
-                            Text(message.text)
-                                .font(.system(.footnote, design: .monospaced))
-                                .foregroundStyle(color(for: message.kind))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(16)
-                }
-                .frame(maxHeight: 140)
-                .background(Color(uiColor: .secondarySystemBackground))
-            }
+        ZStack(alignment: .top) {
+            palette.backgroundColor
+                .ignoresSafeArea()
 
             SSHTerminalSurface(
                 bridge: terminalBridge,
+                palette: palette,
                 onSend: { data in
                     Task {
                         await viewModel.sendRawInput(Array(data))
@@ -48,48 +39,81 @@ struct TerminalView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(viewModel.host.name)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.secondary)
-
-                    if !viewModel.host.usesPasswordAuthentication && RelayServices.sshCredentials.hasStoredKey(for: viewModel.host.remoteIdentity) {
-                        Text("Saved SSH key available")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                if viewModel.isConnecting || viewModel.isProvisioningSavedKey {
-                    ProgressView()
-                }
-
-                if viewModel.canReconnectWithPassword {
-                    Button("Use Password") {
-                        isShowingPasswordSheet = true
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                Button(viewModel.isConnected ? "Disconnect" : "Connect") {
-                    Task {
-                        if viewModel.isConnected {
-                            await viewModel.disconnect()
-                        } else {
-                            await viewModel.connect()
-                        }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
+            if viewModel.isProvisioningSavedKey {
+                TerminalProgressOverlay(
+                    palette: palette,
+                    title: "Installing saved SSH key"
+                )
+                .padding(.horizontal, RelayTheme.Spacing.content)
+                .padding(.top, RelayTheme.Spacing.compact)
+            } else if viewModel.isConnecting {
+                TerminalProgressOverlay(
+                    palette: palette,
+                    title: "Connecting"
+                )
+                .padding(.horizontal, RelayTheme.Spacing.content)
+                .padding(.top, RelayTheme.Spacing.compact)
+            } else if let latestErrorMessage = viewModel.latestErrorMessage,
+                      !viewModel.isShowingHostTrustPrompt {
+                TerminalRecoveryOverlay(
+                    palette: palette,
+                    title: recoveryTitle,
+                    message: latestErrorMessage,
+                    primaryActionTitle: viewModel.isConnected ? "Dismiss" : "Reconnect",
+                    primaryActionTint: viewModel.isConnected ? palette.textColor : palette.greenColor,
+                    primaryAction: handlePrimaryRecoveryAction,
+                    secondaryActionTitle: viewModel.canReconnectWithPassword ? "Use Password" : nil,
+                    secondaryActionTint: palette.blueColor,
+                    secondaryAction: viewModel.canReconnectWithPassword ? { isShowingPasswordSheet = true } : nil
+                )
+                .padding(.horizontal, RelayTheme.Spacing.content)
+                .padding(.top, RelayTheme.Spacing.compact)
+            } else if shouldShowDisconnectedOverlay {
+                TerminalRecoveryOverlay(
+                    palette: palette,
+                    title: "Disconnected",
+                    message: "The SSH session is closed.",
+                    primaryActionTitle: "Reconnect",
+                    primaryActionTint: palette.greenColor,
+                    primaryAction: reconnectTerminal,
+                    secondaryActionTitle: nil,
+                    secondaryActionTint: nil,
+                    secondaryAction: nil
+                )
+                .padding(.horizontal, RelayTheme.Spacing.content)
+                .padding(.top, RelayTheme.Spacing.compact)
             }
-            .padding(16)
-            .background(Color(uiColor: .secondarySystemBackground))
         }
         .navigationTitle(viewModel.host.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(palette.surfaceColor, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if viewModel.canReconnectWithPassword {
+                        Button("Use Password") {
+                            isShowingPasswordSheet = true
+                        }
+                    }
+
+                    if viewModel.isConnecting || viewModel.isConnected {
+                        Button(viewModel.isConnecting ? "Cancel Connection" : "Disconnect", role: .destructive) {
+                            Task {
+                                await viewModel.disconnect()
+                            }
+                        }
+                    } else {
+                        Button("Reconnect") {
+                            reconnectTerminal()
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(palette.textColor)
+                }
+            }
+        }
         .alert(
             "Use an SSH key for future logins?",
             isPresented: Binding(
@@ -153,6 +177,7 @@ struct TerminalView: View {
                 terminalBridge.feed(bytes)
             }
 
+            didAttemptConnection = true
             if !viewModel.isConnected && !viewModel.isConnecting {
                 await viewModel.connect()
             }
@@ -169,14 +194,44 @@ struct TerminalView: View {
         }
     }
 
-    private func color(for kind: TerminalLine.Kind) -> SwiftUI.Color {
-        switch kind {
-        case .remoteOutput:
-            return .primary
-        case .status:
-            return .secondary
-        case .error:
-            return .red
+    private var palette: RelayTerminalPalette {
+        RelayTerminalPalette.palette(for: colorScheme)
+    }
+
+    private var recoveryTitle: String {
+        if viewModel.canReconnectWithPassword {
+            return "Couldn't connect with saved SSH key"
+        }
+
+        if viewModel.isConnected {
+            return "Session error"
+        }
+
+        return "Connection failed"
+    }
+
+    private var shouldShowDisconnectedOverlay: Bool {
+        didAttemptConnection &&
+        !viewModel.isConnected &&
+        !viewModel.isConnecting &&
+        viewModel.latestErrorMessage == nil &&
+        !viewModel.isShowingHostTrustPrompt
+    }
+
+    private func handlePrimaryRecoveryAction() {
+        if viewModel.isConnected {
+            viewModel.dismissLatestError()
+            return
+        }
+
+        reconnectTerminal()
+    }
+
+    private func reconnectTerminal() {
+        terminalBridge.reset()
+        viewModel.dismissLatestError()
+        Task {
+            await viewModel.connect()
         }
     }
 
@@ -187,6 +242,63 @@ struct TerminalView: View {
         Task {
             await viewModel.reconnect(with: pendingReconnectHost)
         }
+    }
+}
+
+private struct TerminalProgressOverlay: View {
+    let palette: RelayTerminalPalette
+    let title: String
+
+    var body: some View {
+        HStack(spacing: RelayTheme.Spacing.compact) {
+            ProgressView()
+                .tint(palette.textColor)
+
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(palette.textColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .relayTerminalPanel(palette, padding: 12)
+    }
+}
+
+private struct TerminalRecoveryOverlay: View {
+    let palette: RelayTerminalPalette
+    let title: String
+    let message: String
+    let primaryActionTitle: String
+    let primaryActionTint: SwiftUI.Color
+    let primaryAction: () -> Void
+    let secondaryActionTitle: String?
+    let secondaryActionTint: SwiftUI.Color?
+    let secondaryAction: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(palette.textColor)
+
+            Text(message)
+                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
+                .foregroundStyle(palette.mutedColor)
+                .textSelection(.enabled)
+
+            HStack(spacing: RelayTheme.Spacing.compact) {
+                Button(primaryActionTitle, action: primaryAction)
+                    .buttonStyle(.borderedProminent)
+                    .tint(primaryActionTint)
+
+                if let secondaryActionTitle, let secondaryAction {
+                    Button(secondaryActionTitle, action: secondaryAction)
+                        .buttonStyle(.bordered)
+                        .tint(secondaryActionTint ?? palette.textColor)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .relayTerminalPanel(palette)
     }
 }
 
@@ -235,6 +347,7 @@ private final class RelayTerminalBridge {
 
 private struct SSHTerminalSurface: UIViewRepresentable {
     let bridge: RelayTerminalBridge
+    let palette: RelayTerminalPalette
     let onSend: (ArraySlice<UInt8>) -> Void
     let onResize: (Int, Int) -> Void
 
@@ -242,6 +355,7 @@ private struct SSHTerminalSurface: UIViewRepresentable {
         let view = RelayTerminalHostView(frame: .zero)
         view.relayBridge = bridge
         view.configure(onSend: onSend, onResize: onResize)
+        view.applyPalette(palette)
         bridge.attach(view)
         DispatchQueue.main.async {
             _ = view.becomeFirstResponder()
@@ -252,6 +366,7 @@ private struct SSHTerminalSurface: UIViewRepresentable {
     func updateUIView(_ uiView: RelayTerminalHostView, context: Context) {
         uiView.relayBridge = bridge
         uiView.configure(onSend: onSend, onResize: onResize)
+        uiView.applyPalette(palette)
         bridge.attach(uiView)
     }
 
@@ -269,15 +384,29 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
     override init(frame: CGRect) {
         super.init(frame: frame)
         terminalDelegate = self
-        nativeBackgroundColor = .black
-        nativeForegroundColor = UIColor(red: 0.89, green: 0.95, blue: 0.90, alpha: 1.0)
-        caretColor = .systemGreen
+        setFonts(
+            normal: TerminalFontRegistry.terminalFont(size: 14, bold: false),
+            bold: TerminalFontRegistry.terminalFont(size: 14, bold: true),
+            italic: TerminalFontRegistry.terminalFont(size: 14, bold: false),
+            boldItalic: TerminalFontRegistry.terminalFont(size: 14, bold: true)
+        )
         optionAsMetaKey = false
+        applyPalette(RelayTerminalPalette.palette(for: traitCollection))
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+
+        guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else {
+            return
+        }
+
+        applyPalette(RelayTerminalPalette.palette(for: traitCollection))
     }
 
     func configure(
@@ -286,6 +415,15 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
     ) {
         self.onSend = onSend
         self.onResize = onResize
+    }
+
+    func applyPalette(_ palette: RelayTerminalPalette) {
+        nativeBackgroundColor = palette.background
+        nativeForegroundColor = palette.text
+        caretColor = palette.green
+        backgroundColor = palette.background
+        tintColor = palette.green
+        setNeedsDisplay()
     }
 
     func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {

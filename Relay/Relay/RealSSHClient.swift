@@ -538,6 +538,12 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler, @
 
     private let eventSink: @Sendable (TerminalEvent) -> Void
     private let readyPromise: EventLoopPromise<Void>
+    private let environment: [(name: String, value: String)] = [
+        ("TERM", "xterm-256color"),
+        ("COLORTERM", "truecolor"),
+        ("LANG", "en_US.UTF-8"),
+        ("LC_CTYPE", "en_US.UTF-8"),
+    ]
     private var state: State = .requestingPseudoTerminal
     private var hasCompletedReady = false
     private var didEmitDisconnect = false
@@ -561,7 +567,7 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler, @
     func channelActive(context: ChannelHandlerContext) {
         let request = SSHChannelRequestEvent.PseudoTerminalRequest(
             wantReply: true,
-            term: "xterm-256color",
+            term: environmentTermName,
             terminalCharacterWidth: 120,
             terminalRowHeight: 32,
             terminalPixelWidth: 0,
@@ -600,6 +606,7 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler, @
             switch self.state {
             case .requestingPseudoTerminal:
                 self.state = .requestingShell
+                self.sendShellEnvironment(into: context)
                 let request = SSHChannelRequestEvent.ShellRequest(wantReply: true)
                 context.triggerUserOutboundEvent(request).whenFailure { error in
                     self.failSetup(SSHClientError.shellRequestFailed, context: context, underlyingError: error)
@@ -693,6 +700,23 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler, @
         }
 
         return String(describing: error)
+    }
+
+    private var environmentTermName: String {
+        environment.first { $0.name == "TERM" }?.value ?? "xterm-256color"
+    }
+
+    private func sendShellEnvironment(into context: ChannelHandlerContext) {
+        for variable in environment {
+            let request = SSHChannelRequestEvent.EnvironmentRequest(
+                wantReply: false,
+                name: variable.name,
+                value: variable.value
+            )
+            context.triggerUserOutboundEvent(request).whenFailure { error in
+                self.eventSink(.error(Self.describe(error)))
+            }
+        }
     }
 }
 

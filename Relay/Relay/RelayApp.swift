@@ -16,6 +16,7 @@ struct RelayApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(RelayTheme.accent)
         }
     }
 }

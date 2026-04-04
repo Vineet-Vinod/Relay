@@ -33,6 +33,8 @@ Relay has two visual modes:
 Light and dark appearance should be global and follow system settings.
 Terminal mode should not force dark mode while the rest of the app stays light.
 Differentiate terminal surfaces through typography, contrast, accent usage, and framing instead.
+Terminal mode should feel like a neutral shell appliance: graphite, slate, and cool gray surfaces with crisp contrast.
+Do not tint terminal backgrounds, cards, or input chrome toward green.
 
 Do not apply terminal styling to general app flows.
 Do not make terminal screens look like generic iOS settings screens.
@@ -63,21 +65,24 @@ Use semantic roles, not raw colors, in implementation where possible.
 - `terminal-text`: theme-relative high-emphasis text
 - `terminal-muted`: theme-relative low-emphasis text
 - `terminal-subtle`: theme-relative divider or stroke
-- `terminal-green`: `#30D158`
-- `terminal-blue`: `#64D2FF`
+- `terminal-accent`: blue action and focus color for terminal-adjacent UI
+- `terminal-success`: `#30D158`
 - `terminal-red`: `#FF453A`
 - `terminal-amber`: `#FFD60A`
 
 ### Color Rules
 
 - Blue is the default action color on app surfaces.
-- Green indicates active connection, success, or terminal prompt context.
+- Blue is also the default action, focus, and selection color on terminal-adjacent surfaces.
+- Green is reserved for explicit success or healthy connected-state indicators, not general UI chrome.
 - Yellow indicates recoverable attention states.
 - Red is reserved for destructive actions, failures, and irreversible warnings.
 - Avoid introducing new brand colors unless the design system is intentionally expanded.
 - Never rely on color alone to communicate state; pair it with text or iconography.
 - In dark mode, both app and terminal surfaces should darken together.
 - In light mode, both app and terminal surfaces should lighten together.
+- Terminal carets, focus rings, primary buttons, and prompts should not default to green.
+- Terminal neutrals should stay visually neutral; avoid olive, mint, or phosphor-cast backgrounds unless the product direction is intentionally revised.
 
 ## Typography
 
@@ -232,6 +237,7 @@ Every new data-backed surface should define all three.
 Use the current app as the baseline:
 
 - Device discovery and network management screens should stay native, light-touch, and status-led.
-- SSH login and active session screens may carry more terminal character: monospaced details, prompt accents, and tighter framing.
+- SSH login and active session screens may carry more terminal character: monospaced details, cool-toned prompt accents, and tighter framing.
 - Blue remains the main action color outside terminal-focused flows.
+- Terminal-focused flows should still anchor on blue for interaction, with green limited to explicit positive status moments.
 - The visual system should feel infrastructural and trustworthy, not consumer-branded.

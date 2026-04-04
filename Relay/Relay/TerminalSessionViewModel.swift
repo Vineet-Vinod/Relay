@@ -14,6 +14,7 @@ final class TerminalSessionViewModel {
     var host: Host
 
     var messages: [TerminalLine] = []
+    var latestErrorMessage: String?
     var isConnecting = false
     var isConnected = false
     var isShowingKeySetupPrompt = false
@@ -40,19 +41,23 @@ final class TerminalSessionViewModel {
         guard !isConnecting, !isConnected else { return }
 
         isConnecting = true
+        latestErrorMessage = nil
         canReconnectWithPassword = false
         appendMessage("Connecting to \(host.username)@\(host.hostname):\(host.port)...", kind: .status)
 
         do {
             try await client.connect(to: host)
             isConnected = true
+            latestErrorMessage = nil
             if host.usesPasswordAuthentication {
                 isShowingKeySetupPrompt = credentials.shouldOfferKeySetup(for: host.remoteIdentity)
             }
         } catch let error as SSHClientError {
             handleConnectError(error)
         } catch {
-            appendMessage(describe(error), kind: .error)
+            let description = describe(error)
+            latestErrorMessage = description
+            appendMessage(description, kind: .error)
             if !host.usesPasswordAuthentication {
                 canReconnectWithPassword = true
             }
@@ -66,15 +71,19 @@ final class TerminalSessionViewModel {
 
         isShowingKeySetupPrompt = false
         isProvisioningSavedKey = true
+        latestErrorMessage = nil
         appendMessage("Generating and installing a saved SSH key...", kind: .status)
 
         do {
             try await client.provisionSavedKey(for: host)
             host.authentication = .automatic
             canReconnectWithPassword = false
+            latestErrorMessage = nil
             appendMessage("Saved SSH key enabled for future logins.", kind: .status)
         } catch {
-            appendMessage(describe(error), kind: .error)
+            let description = describe(error)
+            latestErrorMessage = description
+            appendMessage(description, kind: .error)
         }
 
         isProvisioningSavedKey = false
@@ -97,6 +106,7 @@ final class TerminalSessionViewModel {
             ),
             for: host.endpointIdentity
         )
+        latestErrorMessage = nil
         isShowingHostTrustPrompt = false
         self.pendingHostTrust = nil
         appendMessage("Trusted SSH host fingerprint \(pendingHostTrust.fingerprint).", kind: .status)
@@ -106,6 +116,7 @@ final class TerminalSessionViewModel {
     func rejectPendingHostKey() {
         guard pendingHostTrust != nil else { return }
 
+        latestErrorMessage = nil
         isShowingHostTrustPrompt = false
         pendingHostTrust = nil
         appendMessage("Connection cancelled. SSH host key was not trusted.", kind: .status)
@@ -116,6 +127,7 @@ final class TerminalSessionViewModel {
         self.host = host
         pendingHostTrust = nil
         isShowingHostTrustPrompt = false
+        latestErrorMessage = nil
         await connect()
     }
 
@@ -125,7 +137,9 @@ final class TerminalSessionViewModel {
         do {
             try await client.sendRawInput(bytes)
         } catch {
-            appendMessage(describe(error), kind: .error)
+            let description = describe(error)
+            latestErrorMessage = description
+            appendMessage(description, kind: .error)
         }
     }
 
@@ -142,6 +156,10 @@ final class TerminalSessionViewModel {
         isConnecting = false
     }
 
+    func dismissLatestError() {
+        latestErrorMessage = nil
+    }
+
     var pendingHostTrustSummary: String {
         guard let pendingHostTrust else { return "" }
         return "\(pendingHostTrust.algorithm) \(pendingHostTrust.fingerprint)"
@@ -154,6 +172,7 @@ final class TerminalSessionViewModel {
         case .status(let text):
             appendMessage(text, kind: .status)
         case .error(let text):
+            latestErrorMessage = text
             appendMessage(text, kind: .error)
         case .disconnected:
             isConnected = false
@@ -167,6 +186,7 @@ final class TerminalSessionViewModel {
     }
 
     private func handleConnectError(_ error: SSHClientError) {
+        latestErrorMessage = error.localizedDescription
         appendMessage(error.localizedDescription, kind: .error)
 
         switch error {
