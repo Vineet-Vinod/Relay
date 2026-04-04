@@ -46,6 +46,21 @@ enum RelayTerminalFontSizePreference {
     }
 }
 
+enum RelayVoicePreference {
+    static let minimumSpeechRate: Double = 0.35
+    static let maximumSpeechRate: Double = 0.6
+    static let speechRateStep: Double = 0.05
+    static let defaultSpeechRate: Double = 0.5
+
+    static func clampSpeechRate(_ value: Double) -> Double {
+        min(max(value, minimumSpeechRate), maximumSpeechRate)
+    }
+
+    static func speechRateLabel(for value: Double) -> String {
+        clampSpeechRate(value).formatted(.number.precision(.fractionLength(2)))
+    }
+}
+
 enum RelayBellBehavior: String, CaseIterable, Identifiable {
     case off
     case haptic
@@ -111,8 +126,8 @@ struct RelayPreferences {
     }
 
     var voiceSpeechRate: Double {
-        let storedValue = defaults.object(forKey: RelayDefaultsKey.voiceSpeechRate) as? Double ?? 0.5
-        return min(max(storedValue, 0.35), 0.6)
+        let storedValue = defaults.object(forKey: RelayDefaultsKey.voiceSpeechRate) as? Double ?? RelayVoicePreference.defaultSpeechRate
+        return RelayVoicePreference.clampSpeechRate(storedValue)
     }
 
     var voiceSpeaksToolStatus: Bool {
@@ -133,7 +148,7 @@ struct RelayPreferences {
             RelayDefaultsKey.bellBehavior: RelayBellBehavior.haptic.rawValue,
             RelayDefaultsKey.keepScreenAwake: true,
             RelayDefaultsKey.automaticallyReconnect: true,
-            RelayDefaultsKey.voiceSpeechRate: 0.5,
+            RelayDefaultsKey.voiceSpeechRate: RelayVoicePreference.defaultSpeechRate,
             RelayDefaultsKey.voiceSpeaksToolStatus: false,
         ])
     }

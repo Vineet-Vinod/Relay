@@ -13,7 +13,9 @@ struct VoiceSessionView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
+    @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
 
+    @State private var isPresentingVoiceSettings = false
     @State private var viewModel: VoiceSessionViewModel
 
     init(configuration: VoiceSessionConfiguration) {
@@ -48,6 +50,11 @@ struct VoiceSessionView: View {
             .padding(.horizontal, 18)
             .padding(.top, 18)
             .padding(.bottom, 24)
+        }
+        .sheet(isPresented: $isPresentingVoiceSettings) {
+            VoiceSessionSettingsSheet()
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .task {
             updateIdleTimer()
@@ -84,20 +91,44 @@ struct VoiceSessionView: View {
 
                 Spacer(minLength: RelayTheme.Spacing.content)
 
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(palette.textColor)
-                        .frame(width: 42, height: 42)
-                        .background(
-                            Circle()
-                                .fill(palette.raisedColor.opacity(0.9))
-                        )
+                HStack(spacing: RelayTheme.Spacing.tight) {
+                    Button {
+                        isPresentingVoiceSettings = true
+                    } label: {
+                        VStack(spacing: RelayTheme.Spacing.micro) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(palette.textColor)
+                                .frame(width: 42, height: 42)
+                                .background(
+                                    Circle()
+                                        .fill(palette.raisedColor.opacity(0.9))
+                                )
+
+                            Text(RelayVoicePreference.speechRateLabel(for: voiceSpeechRate))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(palette.mutedColor)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Voice settings")
+                    .accessibilityValue("Speech rate \(RelayVoicePreference.speechRateLabel(for: voiceSpeechRate))")
+
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(palette.textColor)
+                            .frame(width: 42, height: 42)
+                            .background(
+                                Circle()
+                                    .fill(palette.raisedColor.opacity(0.9))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("End voice session")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("End voice session")
             }
 
             HStack(spacing: RelayTheme.Spacing.tight) {
@@ -259,6 +290,93 @@ struct VoiceSessionView: View {
     private func updateIdleTimer() {
         let shouldStayAwake = keepsScreenAwake && viewModel.status != .ended
         UIApplication.shared.isIdleTimerDisabled = shouldStayAwake
+    }
+}
+
+private struct VoiceSessionSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
+
+    var body: some View {
+        let palette = RelayTerminalPalette.palette(for: colorScheme)
+
+        ZStack {
+            palette.backgroundColor
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: RelayTheme.Spacing.section) {
+                HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
+                    VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
+                        Text("Voice Settings")
+                            .font(.headline)
+                            .foregroundStyle(palette.textColor)
+
+                        Text("Adjust how quickly Codex speaks during the call.")
+                            .font(.subheadline)
+                            .foregroundStyle(palette.mutedColor)
+                    }
+
+                    Spacer(minLength: RelayTheme.Spacing.content)
+
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(palette.accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Speech Speed")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(palette.textColor)
+
+                        Spacer(minLength: RelayTheme.Spacing.content)
+
+                        Text(RelayVoicePreference.speechRateLabel(for: voiceSpeechRate))
+                            .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
+                            .foregroundStyle(palette.accentColor)
+                    }
+
+                    Slider(
+                        value: speechRateBinding,
+                        in: RelayVoicePreference.minimumSpeechRate...RelayVoicePreference.maximumSpeechRate,
+                        step: RelayVoicePreference.speechRateStep
+                    ) {
+                        Text("Speech Speed")
+                    } minimumValueLabel: {
+                        Text("Slower")
+                            .font(.caption)
+                            .foregroundStyle(palette.mutedColor)
+                    } maximumValueLabel: {
+                        Text("Faster")
+                            .font(.caption)
+                            .foregroundStyle(palette.mutedColor)
+                    }
+                    .tint(palette.accentColor)
+
+                    Text("Changes apply to the next spoken response without leaving the call.")
+                        .font(.footnote)
+                        .foregroundStyle(palette.mutedColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .relayTerminalPanel(palette, padding: 18)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 20)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private var speechRateBinding: Binding<Double> {
+        Binding(
+            get: { RelayVoicePreference.clampSpeechRate(voiceSpeechRate) },
+            set: { voiceSpeechRate = RelayVoicePreference.clampSpeechRate($0) }
+        )
     }
 }
 

@@ -18,7 +18,7 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
-    @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = 0.5
+    @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
     @AppStorage(RelayDefaultsKey.voiceSpeaksToolStatus) private var voiceSpeaksToolStatus = false
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
@@ -124,7 +124,11 @@ struct SettingsView: View {
             }
 
             Section {
-                Stepper(value: voiceSpeechRateBinding, in: 0.35...0.6, step: 0.05) {
+                Stepper(
+                    value: voiceSpeechRateBinding,
+                    in: RelayVoicePreference.minimumSpeechRate...RelayVoicePreference.maximumSpeechRate,
+                    step: RelayVoicePreference.speechRateStep
+                ) {
                     settingsValueRow(
                         title: "Speech Rate",
                         value: voiceSpeechRateLabel,
@@ -346,13 +350,13 @@ struct SettingsView: View {
 
     private var voiceSpeechRateBinding: Binding<Double> {
         Binding(
-            get: { min(max(voiceSpeechRate, 0.35), 0.6) },
-            set: { voiceSpeechRate = min(max($0, 0.35), 0.6) }
+            get: { RelayVoicePreference.clampSpeechRate(voiceSpeechRate) },
+            set: { voiceSpeechRate = RelayVoicePreference.clampSpeechRate($0) }
         )
     }
 
     private var voiceSpeechRateLabel: String {
-        voiceSpeechRateBinding.wrappedValue.formatted(.number.precision(.fractionLength(2)))
+        RelayVoicePreference.speechRateLabel(for: voiceSpeechRateBinding.wrappedValue)
     }
 
     private func overviewMetric(title: String, value: String) -> some View {
