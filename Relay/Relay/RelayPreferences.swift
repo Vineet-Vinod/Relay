@@ -48,10 +48,10 @@ enum RelayTerminalFontSizePreference {
 
 enum RelayVoicePreference {
     static let minimumSpeechRate: Double = 0.32
-    static let maximumSpeechRate: Double = 0.76
+    static let maximumSpeechRate: Double = 1.0
 
     static let minimumDisplaySpeed: Double = 0.5
-    static let maximumDisplaySpeed: Double = 2.0
+    static let maximumDisplaySpeed: Double = 3.0
     static let displaySpeedStep: Double = 0.05
     static let defaultDisplaySpeed: Double = 1.0
     static let defaultSpeechRate: Double = speechRate(forDisplaySpeed: defaultDisplaySpeed)

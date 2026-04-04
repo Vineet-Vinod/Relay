@@ -58,10 +58,14 @@ struct VoiceSessionView: View {
         }
         .task {
             updateIdleTimer()
+            viewModel.updateSpeechRate(voiceSpeechRate)
             await viewModel.start()
         }
         .onChange(of: keepsScreenAwake) { _, _ in
             updateIdleTimer()
+        }
+        .onChange(of: voiceSpeechRate) { _, newValue in
+            viewModel.updateSpeechRate(newValue)
         }
         .onChange(of: viewModel.status) { _, _ in
             updateIdleTimer()
@@ -389,7 +393,7 @@ private struct VoiceSessionSettingsSheet: View {
                     }
                     .tint(palette.accentColor)
 
-                    Text("Changes apply to the next spoken response without leaving the call.")
+                    Text("Changes apply to queued and active speech while the call is in progress.")
                         .font(.footnote)
                         .foregroundStyle(palette.mutedColor)
                         .fixedSize(horizontal: false, vertical: true)

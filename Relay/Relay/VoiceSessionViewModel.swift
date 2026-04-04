@@ -289,6 +289,10 @@ final class VoiceSessionViewModel {
         }
     }
 
+    func updateSpeechRate(_ speechRate: Double) {
+        playback.updateRate(Float(RelayVoicePreference.clampSpeechRate(speechRate)))
+    }
+
     func finishCurrentTurn() {
         guard canSendCurrentTurn else { return }
         recognizer.stopListening()
