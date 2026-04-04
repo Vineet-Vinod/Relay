@@ -9,6 +9,8 @@ import AVFoundation
 
 @MainActor
 final class VoiceControlSoundPlayer: NSObject {
+    private static let cuePlaybackVolume: Float = 0.62
+
     enum Cue {
         case mute
         case unmute
@@ -42,7 +44,7 @@ final class VoiceControlSoundPlayer: NSObject {
 
         do {
             let player = try AVAudioPlayer(data: data(for: cue))
-            player.volume = 0.24
+            player.volume = Self.cuePlaybackVolume
             player.delegate = self
             player.prepareToPlay()
 

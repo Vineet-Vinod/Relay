@@ -25,6 +25,7 @@ final class SpeechPlaybackService: NSObject {
         let kind: UtteranceKind
         let text: String
         var rate: Float
+        var volume: Float
         let revealsTranscriptOnStart: Bool
     }
 
@@ -54,45 +55,28 @@ final class SpeechPlaybackService: NSObject {
         activeUtterance != nil || !pendingSpeech.isEmpty
     }
 
-    func speak(_ text: String, rate: Float, kind: UtteranceKind) {
+    func speak(_ text: String, rate: Float, volume: Float, kind: UtteranceKind) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        pendingSpeech.append(QueuedSpeech(kind: kind, text: trimmed, rate: rate, revealsTranscriptOnStart: true))
+        pendingSpeech.append(
+            QueuedSpeech(
+                kind: kind,
+                text: trimmed,
+                rate: rate,
+                volume: min(max(volume, 0), 1),
+                revealsTranscriptOnStart: true
+            )
+        )
         startNextUtteranceIfNeeded()
     }
 
     func updateRate(_ rate: Float) {
-        let updatedRate = max(0, rate)
+        updatePlayback(rate: max(0, rate), volume: nil)
+    }
 
-        for index in pendingSpeech.indices {
-            pendingSpeech[index].rate = updatedRate
-        }
-
-        guard let activeSpeech else { return }
-
-        self.activeSpeech = QueuedSpeech(
-            kind: activeSpeech.kind,
-            text: activeSpeech.text,
-            rate: updatedRate,
-            revealsTranscriptOnStart: activeSpeech.revealsTranscriptOnStart
-        )
-
-        guard activeUtterance != nil || synthesizer.isSpeaking || synthesizer.isPaused else {
-            return
-        }
-
-        let remainingText = remainingTextForRestart(from: activeSpeech)
-        guard let remainingText else { return }
-
-        speechPendingRestart = QueuedSpeech(
-            kind: activeSpeech.kind,
-            text: remainingText,
-            rate: updatedRate,
-            revealsTranscriptOnStart: false
-        )
-        cancellationBehavior = .restart
-        synthesizer.stopSpeaking(at: .immediate)
+    func updateVolume(_ volume: Float) {
+        updatePlayback(rate: nil, volume: min(max(volume, 0), 1))
     }
 
     func fastForward() {
@@ -137,6 +121,7 @@ final class SpeechPlaybackService: NSObject {
         let nextSpeech = pendingSpeech.removeFirst()
         let utterance = AVSpeechUtterance(string: nextSpeech.text)
         utterance.rate = nextSpeech.rate
+        utterance.volume = nextSpeech.volume
         utterance.prefersAssistiveTechnologySettings = false
         activeUtterance = utterance
         activeSpeech = nextSpeech
@@ -184,6 +169,45 @@ final class SpeechPlaybackService: NSObject {
 
         let remaining = String(speech.text[stringIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
         return remaining.isEmpty ? nil : String(remaining)
+    }
+
+    private func updatePlayback(rate: Float?, volume: Float?) {
+        for index in pendingSpeech.indices {
+            if let rate {
+                pendingSpeech[index].rate = rate
+            }
+            if let volume {
+                pendingSpeech[index].volume = volume
+            }
+        }
+
+        guard let activeSpeech else { return }
+
+        let updatedSpeech = QueuedSpeech(
+            kind: activeSpeech.kind,
+            text: activeSpeech.text,
+            rate: rate ?? activeSpeech.rate,
+            volume: volume ?? activeSpeech.volume,
+            revealsTranscriptOnStart: activeSpeech.revealsTranscriptOnStart
+        )
+        self.activeSpeech = updatedSpeech
+
+        guard activeUtterance != nil || synthesizer.isSpeaking || synthesizer.isPaused else {
+            return
+        }
+
+        let remainingText = remainingTextForRestart(from: activeSpeech)
+        guard let remainingText else { return }
+
+        speechPendingRestart = QueuedSpeech(
+            kind: activeSpeech.kind,
+            text: remainingText,
+            rate: updatedSpeech.rate,
+            volume: updatedSpeech.volume,
+            revealsTranscriptOnStart: false
+        )
+        cancellationBehavior = .restart
+        synthesizer.stopSpeaking(at: .immediate)
     }
 }
 

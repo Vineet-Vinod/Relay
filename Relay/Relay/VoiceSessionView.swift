@@ -26,31 +26,27 @@ struct VoiceSessionView: View {
     var body: some View {
         let palette = RelayTerminalPalette.palette(for: colorScheme)
 
-        ZStack {
-            LinearGradient(
-                colors: [
-                    palette.backgroundColor,
-                    palette.surfaceColor.opacity(0.94),
-                    palette.backgroundColor,
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack(alignment: .topTrailing) {
+                palette.backgroundColor
+                    .ignoresSafeArea()
 
-            VStack(spacing: RelayTheme.Spacing.section) {
-                header(palette: palette)
-
-                transcriptPanel(palette: palette)
+                chatSurface(palette: palette)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 18)
+                    .padding(.bottom, 12)
 
-                composerPanel(palette: palette)
-
-                controls(palette: palette)
+                topRightSettingsButton(palette: palette)
+                    .padding(.top, 18)
+                    .padding(.trailing, 18)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 24)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                controls(palette: palette)
+                    .frame(height: bottomTrayHeight(for: geometry.size.height))
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .background(palette.backgroundColor.opacity(0.96))
+            }
         }
         .sheet(isPresented: $isPresentingVoiceSettings) {
             VoiceSessionSettingsSheet()
@@ -90,134 +86,73 @@ struct VoiceSessionView: View {
         }
     }
 
-    private func header(palette: RelayTerminalPalette) -> some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
-            HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
-                VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
-                    Text(viewModel.configuration.host.name)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(palette.textColor)
-
-                    Text(viewModel.configuration.host.hostname)
-                        .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
-                        .foregroundStyle(palette.mutedColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer(minLength: RelayTheme.Spacing.content)
-
-                HStack(spacing: RelayTheme.Spacing.tight) {
-                    Button {
-                        isPresentingVoiceSettings = true
-                    } label: {
-                        VStack(spacing: RelayTheme.Spacing.micro) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(palette.textColor)
-                                .frame(width: 42, height: 42)
-                                .background(
-                                    Circle()
-                                        .fill(palette.raisedColor.opacity(0.9))
-                                )
-
-                            Text(RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate))
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(palette.mutedColor)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Voice settings")
-                    .accessibilityValue("Speech rate \(RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate))")
-
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(palette.textColor)
-                            .frame(width: 42, height: 42)
-                            .background(
-                                Circle()
-                                    .fill(palette.raisedColor.opacity(0.9))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("End voice session")
-                }
-            }
-
-            HStack(spacing: RelayTheme.Spacing.tight) {
-                statusBadge(palette: palette)
-
-                Text(viewModel.resolvedWorkspacePath)
-                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 12))
-                    .foregroundStyle(palette.mutedColor)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+    private func topRightSettingsButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            isPresentingVoiceSettings = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(palette.textColor)
+                .frame(width: 46, height: 46)
+                .background(
+                    Circle()
+                        .fill(palette.surfaceColor.opacity(0.96))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(palette.subtleColor.opacity(0.8), lineWidth: 1)
+                )
         }
-        .relayTerminalPanel(palette, padding: 18)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Voice settings")
+        .accessibilityValue("Speech rate \(RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate))")
     }
 
-    private func statusBadge(palette: RelayTerminalPalette) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: statusSymbolName)
-                .font(.caption2.weight(.semibold))
+    private func chatSurface(palette: RelayTerminalPalette) -> some View {
+        VStack(spacing: RelayTheme.Spacing.compact) {
+            transcriptPanel(palette: palette)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Text(viewModel.status.title)
-                .font(.caption2.weight(.semibold))
-        }
-            .foregroundStyle(palette.mutedColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(palette.surfaceColor.opacity(0.96))
-            )
-            .overlay(
-                Capsule()
-                    .stroke(palette.subtleColor.opacity(0.7), lineWidth: 1)
-            )
-    }
-
-    private var statusSymbolName: String {
-        switch viewModel.status {
-        case .preparing:
-            return "clock.fill"
-        case .ready:
-            return "checkmark.circle.fill"
-        case .listening:
-            return "mic.fill"
-        case .processing:
-            return "ellipsis.circle.fill"
-        case .speaking:
-            return "speaker.wave.2.fill"
-        case .muted:
-            return "mic.slash.fill"
-        case .failed:
-            return "exclamationmark.circle.fill"
-        case .ended:
-            return "phone.down.fill"
+            composerPanel(palette: palette)
+                .padding(.horizontal, 18)
         }
     }
 
     private func transcriptPanel(palette: RelayTerminalPalette) -> some View {
-        ScrollViewReader { proxy in
+        let bottomAnchorID = "voice-transcript-bottom"
+
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: RelayTheme.Spacing.compact) {
+                LazyVStack(spacing: RelayTheme.Spacing.tight) {
                     ForEach(viewModel.transcript) { item in
                         VoiceTranscriptRow(item: item, palette: palette)
                             .id(item.id)
                     }
+
+                    if viewModel.showsConversationActivity {
+                        VoiceTranscriptActivityRow(palette: palette)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(bottomAnchorID)
                 }
-                .padding(16)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
             }
-            .relayTerminalPanel(palette, padding: 0)
             .onChange(of: viewModel.transcript.count) { _, _ in
-                guard let lastID = viewModel.transcript.last?.id else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo(lastID, anchor: .bottom)
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                }
+            }
+            .onChange(of: viewModel.transcript.last?.text ?? "") { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                }
+            }
+            .onChange(of: viewModel.showsConversationActivity) { _, _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                 }
             }
         }
@@ -225,34 +160,14 @@ struct VoiceSessionView: View {
 
     private func composerPanel(palette: RelayTerminalPalette) -> some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-            HStack(alignment: .center, spacing: RelayTheme.Spacing.compact) {
-                VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
-                    Text("Live Transcript")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.mutedColor)
+            Text("Live Transcript")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(palette.mutedColor)
 
-                    if viewModel.status == .listening || viewModel.isAwaitingSendCue {
-                        Text(
-                            viewModel.isAwaitingSendCue
-                            ? "Say \"\(VoiceTurnEndCue.token)\" or tap Send."
-                            : "Speak, then say \"\(VoiceTurnEndCue.token)\" or tap Send."
-                        )
-                            .font(.caption2)
-                            .foregroundStyle(palette.mutedColor)
-                    }
-                }
-
-                Spacer(minLength: RelayTheme.Spacing.content)
-
-                Button {
-                    viewModel.finishCurrentTurn()
-                } label: {
-                    Label("Send", systemImage: "arrow.up.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(palette.accentColor)
-                .disabled(!viewModel.canSendCurrentTurn)
+            if viewModel.status == .listening || viewModel.isAwaitingSendCue {
+                Text("Speak naturally. Relay will keep this draft visible until you send it.")
+                    .font(.caption2)
+                    .foregroundStyle(palette.mutedColor)
             }
 
             Text(viewModel.draftUserSpeech.isEmpty ? draftPlaceholder : viewModel.draftUserSpeech)
@@ -285,45 +200,75 @@ struct VoiceSessionView: View {
     }
 
     private func controls(palette: RelayTerminalPalette) -> some View {
-        VStack(spacing: 22) {
-            Button {
-                isPresentingAudioRoutes = true
-            } label: {
-                VoiceAudioRouteControl(
-                    route: viewModel.selectedAudioRoute,
-                    palette: palette
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Audio output")
-            .accessibilityValue(viewModel.selectedAudioRoute.name)
+        VStack(spacing: RelayTheme.Spacing.content) {
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                .fill(palette.subtleColor.opacity(0.9))
+                .frame(width: 44, height: 5)
+                .padding(.top, 4)
 
-            HStack(alignment: .top, spacing: RelayTheme.Spacing.section) {
+            LazyVGrid(columns: controlColumns, alignment: .center, spacing: 18) {
+                Button {
+                    isPresentingAudioRoutes = true
+                } label: {
+                    VoicePhoneControlButton(
+                        title: viewModel.selectedAudioRoute.name,
+                        subtitle: nil,
+                        systemImage: viewModel.selectedAudioRoute.systemImage,
+                        palette: palette,
+                        accentColor: palette.accentColor,
+                        isActive: false,
+                        usesSolidAccentFillWhenActive: false,
+                        isDisabled: false
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Audio output")
+                .accessibilityValue(viewModel.selectedAudioRoute.name)
+
                 Button {
                     viewModel.toggleMute()
                 } label: {
                     VoicePhoneControlButton(
                         title: viewModel.isMuted ? "Unmute" : "Mute",
-                        subtitle: viewModel.isMuted ? "Microphone off" : nil,
+                        subtitle: nil,
                         systemImage: viewModel.isMuted ? "mic.slash.fill" : "mic.fill",
                         palette: palette,
                         accentColor: palette.warningColor,
                         isActive: viewModel.isMuted,
+                        usesSolidAccentFillWhenActive: false,
                         isDisabled: false
                     )
                 }
                 .buttonStyle(.plain)
 
                 Button {
+                    viewModel.finishCurrentTurn()
+                } label: {
+                    VoicePhoneControlButton(
+                        title: "Send",
+                        subtitle: nil,
+                        systemImage: "arrow.up.circle.fill",
+                        palette: palette,
+                        accentColor: palette.accentColor,
+                        isActive: viewModel.canSendCurrentTurn,
+                        usesSolidAccentFillWhenActive: false,
+                        isDisabled: !viewModel.canSendCurrentTurn
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!viewModel.canSendCurrentTurn)
+
+                Button {
                     viewModel.fastForwardPlayback()
                 } label: {
                     VoicePhoneControlButton(
                         title: "Skip",
-                        subtitle: viewModel.canFastForward ? "Current reply" : "Unavailable",
+                        subtitle: nil,
                         systemImage: "forward.end.fill",
                         palette: palette,
                         accentColor: palette.accentColor,
                         isActive: false,
+                        usesSolidAccentFillWhenActive: false,
                         isDisabled: !viewModel.canFastForward
                     )
                 }
@@ -332,54 +277,60 @@ struct VoiceSessionView: View {
                 .accessibilityLabel("Fast forward speech")
 
                 Button {
+                    dismiss()
+                } label: {
+                    VoicePhoneControlButton(
+                        title: "End",
+                        subtitle: nil,
+                        systemImage: "phone.down.fill",
+                        palette: palette,
+                        accentColor: palette.dangerColor,
+                        isActive: true,
+                        usesSolidAccentFillWhenActive: true,
+                        isDisabled: false
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("End voice session")
+
+                Button {
                     viewModel.interrupt()
                 } label: {
                     VoicePhoneControlButton(
-                        title: "Interrupt",
-                        subtitle: viewModel.canInterrupt ? "Stop speaking" : "Unavailable",
+                        title: "Stop",
+                        subtitle: nil,
                         systemImage: "waveform.badge.xmark",
                         palette: palette,
                         accentColor: palette.accentColor,
                         isActive: false,
+                        usesSolidAccentFillWhenActive: false,
                         isDisabled: !viewModel.canInterrupt
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(!viewModel.canInterrupt)
             }
-
-            Button {
-                dismiss()
-            } label: {
-                VStack(spacing: RelayTheme.Spacing.tight) {
-                    Image(systemName: "phone.down.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Color.white)
-                        .frame(width: 76, height: 76)
-                        .background(
-                            Circle()
-                                .fill(palette.dangerColor)
-                        )
-
-                    Text("End")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.textColor)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("End voice session")
         }
-        .padding(20)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 24)
         .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
                 .fill(palette.surfaceColor.opacity(0.98))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
                 .stroke(palette.subtleColor.opacity(0.75), lineWidth: 1)
         )
+    }
+
+    private var controlColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: RelayTheme.Spacing.section), count: 3)
+    }
+
+    private func bottomTrayHeight(for availableHeight: CGFloat) -> CGFloat {
+        min(max(availableHeight * 0.27, 210), 280)
     }
 
     private func updateIdleTimer() {
@@ -611,44 +562,14 @@ private struct VoiceTranscriptRow: View {
     let palette: RelayTerminalPalette
 
     var body: some View {
-        VStack(alignment: alignment, spacing: RelayTheme.Spacing.tight) {
-            HStack(spacing: 6) {
-                Image(systemName: labelSymbolName)
-                    .font(.caption2.weight(.semibold))
-
-                Text(label)
-                    .font(.caption2.weight(.semibold))
+        Group {
+            switch item.kind {
+            case .system, .toolStatus:
+                statusRow
+            case .user, .assistant:
+                messageRow
             }
-            .foregroundStyle(palette.mutedColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(palette.surfaceColor.opacity(0.96))
-            )
-            .overlay(
-                Capsule()
-                    .stroke(palette.subtleColor.opacity(0.7), lineWidth: 1)
-            )
-
-            Text(item.text)
-                .font(font)
-                .foregroundStyle(textColor)
-                .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
-                .fill(backgroundColor)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
-                .stroke(palette.subtleColor.opacity(0.65), lineWidth: 1)
-        )
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
-        .padding(.leading, alignment == .trailing ? 44 : 0)
-        .padding(.trailing, alignment == .leading ? 44 : 0)
     }
 
     private var label: String {
@@ -664,8 +585,55 @@ private struct VoiceTranscriptRow: View {
         }
     }
 
-    private var alignment: HorizontalAlignment {
-        item.kind == .user ? .trailing : .leading
+    private var messageRow: some View {
+        VStack(alignment: messageAlignment, spacing: 6) {
+            Text(label.uppercased())
+                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 11, bold: true))
+                .foregroundStyle(metadataColor)
+
+            Text(item.text)
+                .font(font)
+                .foregroundStyle(textColor)
+                .frame(maxWidth: .infinity, alignment: rowAlignment)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
+                .stroke(borderColor, lineWidth: 1)
+        )
+        .frame(maxWidth: .infinity, alignment: rowAlignment)
+        .padding(.leading, item.kind == .user ? 56 : 0)
+        .padding(.trailing, item.kind == .assistant ? 56 : 0)
+    }
+
+    private var statusRow: some View {
+        HStack(alignment: .top, spacing: RelayTheme.Spacing.tight) {
+            Image(systemName: labelSymbolName)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(statusAccentColor)
+                .padding(.top, 1)
+
+            Text(item.text)
+                .font(.footnote)
+                .foregroundStyle(palette.mutedColor)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(palette.surfaceColor.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(palette.subtleColor.opacity(0.55), lineWidth: 1)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var labelSymbolName: String {
@@ -681,6 +649,14 @@ private struct VoiceTranscriptRow: View {
         }
     }
 
+    private var messageAlignment: HorizontalAlignment {
+        item.kind == .user ? .trailing : .leading
+    }
+
+    private var rowAlignment: Alignment {
+        item.kind == .user ? .trailing : .leading
+    }
+
     private var font: Font {
         switch item.kind {
         case .assistant, .toolStatus, .system:
@@ -691,11 +667,48 @@ private struct VoiceTranscriptRow: View {
     }
 
     private var backgroundColor: Color {
-        palette.raisedColor
+        item.kind == .user ? palette.accentColor.opacity(0.12) : palette.raisedColor
+    }
+
+    private var borderColor: Color {
+        item.kind == .user ? palette.accentColor.opacity(0.28) : palette.subtleColor.opacity(0.65)
     }
 
     private var textColor: Color {
         palette.textColor
+    }
+
+    private var metadataColor: Color {
+        item.kind == .user ? palette.accentColor : palette.mutedColor
+    }
+
+    private var statusAccentColor: Color {
+        item.kind == .system ? palette.warningColor : palette.mutedColor
+    }
+}
+
+private struct VoiceTranscriptActivityRow: View {
+    let palette: RelayTerminalPalette
+
+    var body: some View {
+        HStack {
+            ProgressView()
+                .controlSize(.small)
+                .tint(palette.accentColor)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(palette.raisedColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(palette.subtleColor.opacity(0.65), lineWidth: 1)
+                )
+                .accessibilityLabel("Codex is working")
+
+            Spacer(minLength: 0)
+        }
+        .padding(.trailing, 56)
     }
 }
 
@@ -706,14 +719,15 @@ private struct VoicePhoneControlButton: View {
     let palette: RelayTerminalPalette
     let accentColor: Color
     let isActive: Bool
+    let usesSolidAccentFillWhenActive: Bool
     let isDisabled: Bool
 
     var body: some View {
-        VStack(spacing: RelayTheme.Spacing.compact) {
+        VStack(spacing: 8) {
             Image(systemName: systemImage)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(iconColor)
-                .frame(width: 72, height: 72)
+                .frame(width: 64, height: 64)
                 .background(
                     Circle()
                         .fill(circleFillColor)
@@ -727,6 +741,7 @@ private struct VoicePhoneControlButton: View {
                 Text(title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(labelColor)
+                    .lineLimit(1)
 
                 if let subtitle {
                     Text(subtitle)
@@ -745,6 +760,9 @@ private struct VoicePhoneControlButton: View {
         }
 
         if isActive {
+            if usesSolidAccentFillWhenActive {
+                return accentColor
+            }
             return accentColor.opacity(0.2)
         }
 
@@ -752,6 +770,10 @@ private struct VoicePhoneControlButton: View {
     }
 
     private var circleStrokeColor: Color {
+        if isActive && usesSolidAccentFillWhenActive {
+            return accentColor.opacity(0.95)
+        }
+
         if isActive {
             return accentColor.opacity(0.65)
         }
@@ -764,6 +786,10 @@ private struct VoicePhoneControlButton: View {
             return palette.mutedColor.opacity(0.55)
         }
 
+        if isActive && usesSolidAccentFillWhenActive {
+            return .white
+        }
+
         if isActive {
             return accentColor
         }
@@ -773,54 +799,6 @@ private struct VoicePhoneControlButton: View {
 
     private var labelColor: Color {
         isDisabled ? palette.mutedColor.opacity(0.7) : palette.textColor
-    }
-}
-
-private struct VoiceAudioRouteControl: View {
-    let route: VoiceAudioSessionCoordinator.AudioRouteOption
-    let palette: RelayTerminalPalette
-
-    var body: some View {
-        HStack(spacing: RelayTheme.Spacing.compact) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(palette.raisedColor)
-                .frame(width: 54, height: 54)
-                .overlay {
-                    Image(systemName: route.systemImage)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(route.kind == .receiver ? palette.textColor : palette.accentColor)
-                }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Audio Output")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.mutedColor)
-
-                Text(route.name)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(palette.textColor)
-
-                Text(route.detail)
-                    .font(.caption2)
-                    .foregroundStyle(palette.mutedColor)
-            }
-
-            Spacer(minLength: RelayTheme.Spacing.content)
-
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(palette.mutedColor)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(palette.raisedColor.opacity(0.96))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(palette.subtleColor.opacity(0.85), lineWidth: 1)
-        )
     }
 }
 

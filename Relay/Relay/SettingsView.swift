@@ -19,6 +19,7 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
     @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
+    @AppStorage(RelayDefaultsKey.voiceOutputVolume) private var voiceOutputVolume = RelayVoicePreference.defaultOutputVolume
     @AppStorage(RelayDefaultsKey.voiceSpeaksToolStatus) private var voiceSpeaksToolStatus = false
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
@@ -136,11 +137,23 @@ struct SettingsView: View {
                     )
                 }
 
+                Stepper(
+                    value: $voiceOutputVolume,
+                    in: RelayVoicePreference.minimumOutputVolume...RelayVoicePreference.maximumOutputVolume,
+                    step: RelayVoicePreference.outputVolumeStep
+                ) {
+                    settingsValueRow(
+                        title: "Voice Volume",
+                        value: RelayVoicePreference.outputVolumeLabel(for: voiceOutputVolume),
+                        detail: nil
+                    )
+                }
+
                 Toggle("Speak Tool Status", isOn: $voiceSpeaksToolStatus)
             } header: {
                 Text("Voice")
             } footer: {
-                Text("Relay uses on-device speech recognition and text-to-speech to keep Codex usable while the screen is not your primary focus.")
+                Text("Relay uses on-device speech recognition and text-to-speech to keep Codex usable while the screen is not your primary focus. New voice calls start on the loudspeaker unless you pick another route.")
             }
 
             Section {

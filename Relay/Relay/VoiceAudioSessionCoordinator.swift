@@ -51,7 +51,7 @@ final class VoiceAudioSessionCoordinator {
     private var notificationObservers: [NSObjectProtocol] = []
 
     var availableRoutes: [AudioRouteOption] = [.receiver, .speaker]
-    var selectedRoute: AudioRouteOption = .receiver
+    var selectedRoute: AudioRouteOption = .speaker
     var onRouteStateChanged: (([AudioRouteOption], AudioRouteOption) -> Void)?
 
     init() {
@@ -65,7 +65,7 @@ final class VoiceAudioSessionCoordinator {
 
         try session.setCategory(
             .playAndRecord,
-            mode: .voiceChat,
+            mode: .default,
             options: [
                 .allowBluetooth,
                 .allowBluetoothA2DP,
@@ -73,6 +73,9 @@ final class VoiceAudioSessionCoordinator {
         )
         try session.setActive(true, options: [])
         refreshRouteState()
+        if selectedRoute.kind == .receiver {
+            try? selectRoute(.speaker)
+        }
     }
 
     func deactivate() {
@@ -236,13 +239,13 @@ final class VoiceAudioSessionCoordinator {
     private func routeSymbol(for portType: AVAudioSession.Port) -> String {
         switch portType {
         case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
-            return "bluetooth"
+            return "dot.radiowaves.left.and.right"
         case .headphones, .headsetMic:
             return "headphones"
         case .carAudio:
             return "car.fill"
         case .usbAudio:
-            return "cable.connector"
+            return "memorychip"
         default:
             return "speaker.wave.2.fill"
         }

@@ -544,8 +544,6 @@ def main():
     if session_id:
         emit("session_ready", session_id=session_id, cwd=cwd)
 
-    emit("tool_status", text="Launching Codex.")
-
     line_queue = queue.Queue()
 
     def pump_output(stream, output_queue):
@@ -563,8 +561,6 @@ def main():
     )
     reader_thread.start()
 
-    last_status_at = time.monotonic()
-
     if process.stdout is not None:
         while True:
             try:
@@ -572,10 +568,6 @@ def main():
             except queue.Empty:
                 if process.poll() is not None:
                     break
-                now = time.monotonic()
-                if now - last_status_at >= 8:
-                    emit("tool_status", text="Still waiting on Codex.")
-                    last_status_at = now
                 continue
 
             if raw_line is None:
@@ -591,25 +583,20 @@ def main():
                 if line.startswith("WARNING:"):
                     continue
                 emit("tool_status", text=line)
-                last_status_at = time.monotonic()
                 continue
 
             event_type = event.get("type")
             if event_type == "thread.started":
                 session_id = event.get("thread_id") or session_id
                 emit("session_ready", session_id=session_id, cwd=cwd)
-                last_status_at = time.monotonic()
                 continue
 
             if event_type == "error":
                 message = str(event.get("message") or "Codex reported an error.")
                 emit("error", message=message, recoverable=True)
-                last_status_at = time.monotonic()
                 continue
 
             if event_type == "turn.started":
-                emit("tool_status", text="Codex is working.")
-                last_status_at = time.monotonic()
                 continue
 
             for candidate in collect_strings(event):
@@ -618,7 +605,6 @@ def main():
                     continue
                 delivered_text += increment if not delivered_text else (" " + increment if not increment.startswith((" ", "\n")) else increment)
                 emit("assistant_delta", text=increment)
-                last_status_at = time.monotonic()
 
     reader_thread.join(timeout=0.1)
     return_code = process.wait()
@@ -639,7 +625,6 @@ def main():
         emit("assistant_delta", text=increment)
 
     if return_code in (-signal.SIGINT, -signal.SIGTERM):
-        emit("tool_status", text="Codex interrupted.")
         emit("assistant_done")
         return 0
 

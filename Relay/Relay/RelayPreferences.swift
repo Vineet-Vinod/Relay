@@ -17,6 +17,7 @@ enum RelayDefaultsKey {
     static let keepScreenAwake = "relay.preferences.keep-screen-awake.v1"
     static let automaticallyReconnect = "relay.preferences.automatically-reconnect.v1"
     static let voiceSpeechRate = "relay.preferences.voice-speech-rate.v1"
+    static let voiceOutputVolume = "relay.preferences.voice-output-volume.v1"
     static let voiceSpeaksToolStatus = "relay.preferences.voice-speaks-tool-status.v1"
 
     static let all = [
@@ -28,6 +29,7 @@ enum RelayDefaultsKey {
         keepScreenAwake,
         automaticallyReconnect,
         voiceSpeechRate,
+        voiceOutputVolume,
         voiceSpeaksToolStatus,
     ]
 }
@@ -55,9 +57,17 @@ enum RelayVoicePreference {
     static let displaySpeedStep: Double = 0.05
     static let defaultDisplaySpeed: Double = 1.0
     static let defaultSpeechRate: Double = speechRate(forDisplaySpeed: defaultDisplaySpeed)
+    static let minimumOutputVolume: Double = 0.4
+    static let maximumOutputVolume: Double = 1.0
+    static let outputVolumeStep: Double = 0.05
+    static let defaultOutputVolume: Double = 1.0
 
     static func clampSpeechRate(_ value: Double) -> Double {
         min(max(value, minimumSpeechRate), maximumSpeechRate)
+    }
+
+    static func clampOutputVolume(_ value: Double) -> Double {
+        min(max(value, minimumOutputVolume), maximumOutputVolume)
     }
 
     static func speechRate(forDisplaySpeed value: Double) -> Double {
@@ -75,6 +85,11 @@ enum RelayVoicePreference {
     static func displaySpeedLabel(forSpeechRate value: Double) -> String {
         let displaySpeed = displaySpeed(forSpeechRate: value)
         return "\(displaySpeed.formatted(.number.precision(.fractionLength(2))))x"
+    }
+
+    static func outputVolumeLabel(for value: Double) -> String {
+        let percentage = Int((clampOutputVolume(value) * 100).rounded())
+        return "\(percentage)%"
     }
 }
 
@@ -147,6 +162,11 @@ struct RelayPreferences {
         return RelayVoicePreference.clampSpeechRate(storedValue)
     }
 
+    var voiceOutputVolume: Double {
+        let storedValue = defaults.object(forKey: RelayDefaultsKey.voiceOutputVolume) as? Double ?? RelayVoicePreference.defaultOutputVolume
+        return RelayVoicePreference.clampOutputVolume(storedValue)
+    }
+
     var voiceSpeaksToolStatus: Bool {
         defaults.object(forKey: RelayDefaultsKey.voiceSpeaksToolStatus) as? Bool ?? false
     }
@@ -166,6 +186,7 @@ struct RelayPreferences {
             RelayDefaultsKey.keepScreenAwake: true,
             RelayDefaultsKey.automaticallyReconnect: true,
             RelayDefaultsKey.voiceSpeechRate: RelayVoicePreference.defaultSpeechRate,
+            RelayDefaultsKey.voiceOutputVolume: RelayVoicePreference.defaultOutputVolume,
             RelayDefaultsKey.voiceSpeaksToolStatus: false,
         ])
     }

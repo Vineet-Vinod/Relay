@@ -55,14 +55,21 @@ final class VoiceSessionViewModel {
     var resolvedWorkspacePath: String
     var sessionID: String?
     var latestErrorMessage: String?
-    var isMuted = false
     var isPrepared = false
     var isEnding = false
     var availableAudioRoutes: [VoiceAudioSessionCoordinator.AudioRouteOption] = []
     var selectedAudioRoute: VoiceAudioSessionCoordinator.AudioRouteOption = .receiver
 
+    var isMuted: Bool {
+        isUserMuted || isWaitingForAssistantTurnToFinish
+    }
+
     var hasDraftUserSpeech: Bool {
         !draftUserSpeech.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var showsConversationActivity: Bool {
+        activeTurnTask != nil || status == .processing
     }
 
     var isAwaitingSendCue: Bool {
@@ -83,6 +90,8 @@ final class VoiceSessionViewModel {
     private var shouldResumeListeningAfterPlayback = false
     private var committedDraftSpeech = ""
     private var liveDraftSpeech = ""
+    private var isUserMuted = false
+    private var isWaitingForAssistantTurnToFinish = false
 
     init(
         configuration: VoiceSessionConfiguration,
@@ -149,13 +158,12 @@ final class VoiceSessionViewModel {
                 return
             }
 
-            if self.shouldResumeListeningAfterPlayback {
-                self.shouldResumeListeningAfterPlayback = false
-                self.beginListeningIfPossible()
-            } else if self.isMuted {
-                self.status = .muted
+            if self.shouldResumeListeningAfterPlayback, self.activeTurnTask == nil {
+                self.completeAssistantTurn(playCue: self.didReceiveAssistantDone)
             } else if self.activeTurnTask != nil {
                 self.status = .processing
+            } else if self.isMuted {
+                self.status = .muted
             } else {
                 self.status = .ready
             }
@@ -230,7 +238,6 @@ final class VoiceSessionViewModel {
             let resolvedWorkspace = try await bridgeClient.prepare(workspacePath: configuration.workspacePath)
             resolvedWorkspacePath = resolvedWorkspace
             isPrepared = true
-            appendTranscript(kind: .system, text: "Voice session ready in \(resolvedWorkspace).")
             beginListeningIfPossible()
         } catch {
             let message = describe(error)
@@ -246,6 +253,8 @@ final class VoiceSessionViewModel {
         cancelMuteTransition()
         activeTurnTask?.cancel()
         activeTurnTask = nil
+        shouldResumeListeningAfterPlayback = false
+        isWaitingForAssistantTurnToFinish = false
         recognizer.stopListening()
         playback.stop()
         await bridgeClient.endSession()
@@ -257,12 +266,13 @@ final class VoiceSessionViewModel {
     func toggleMute() {
         cancelMuteTransition()
         cancelSendCuePauseTask()
-        if isMuted {
-            isMuted = false
+        if isUserMuted {
+            isUserMuted = false
             status = currentStatusForSessionPhase()
+            guard !isWaitingForAssistantTurnToFinish else { return }
             scheduleListeningResumeAfterUnmuteCue()
         } else {
-            setMicrophoneMuted(true, playCue: true, clearDraft: true)
+            setUserMuted(true, playCue: true, clearDraft: true)
         }
     }
 
@@ -272,6 +282,7 @@ final class VoiceSessionViewModel {
         playback.stop()
         assistantSpeechBuffer.removeAll(keepingCapacity: true)
         shouldResumeListeningAfterPlayback = false
+        isWaitingForAssistantTurnToFinish = false
         clearDraftUserSpeech()
 
         if let activeTurnTask {
@@ -282,7 +293,6 @@ final class VoiceSessionViewModel {
             self.activeTurnTask = nil
         }
 
-        appendTranscript(kind: .system, text: "Interrupted.")
         if isMuted {
             status = .muted
         } else {
@@ -301,6 +311,10 @@ final class VoiceSessionViewModel {
 
     func updateSpeechRate(_ speechRate: Double) {
         playback.updateRate(Float(RelayVoicePreference.clampSpeechRate(speechRate)))
+    }
+
+    func updateSpeechVolume(_ volume: Double) {
+        playback.updateVolume(Float(RelayVoicePreference.clampOutputVolume(volume)))
     }
 
     func selectAudioRoute(_ route: VoiceAudioSessionCoordinator.AudioRouteOption) {
@@ -343,6 +357,7 @@ final class VoiceSessionViewModel {
     }
 
     private func scheduleListeningResumeAfterUnmuteCue() {
+        cancelMuteTransition()
         muteTransitionTask = Task { [weak self] in
             guard let self else { return }
 
@@ -389,9 +404,8 @@ final class VoiceSessionViewModel {
         return .preparing
     }
 
-    private func setMicrophoneMuted(_ muted: Bool, playCue: Bool, clearDraft: Bool) {
-        isMuted = muted
-
+    private func setUserMuted(_ muted: Bool, playCue: Bool, clearDraft: Bool) {
+        isUserMuted = muted
         if muted {
             recognizer.stopListening()
             if clearDraft {
@@ -408,6 +422,30 @@ final class VoiceSessionViewModel {
         }
 
         status = currentStatusForSessionPhase()
+    }
+
+    private func setWaitingForAssistantTurn(_ waiting: Bool) {
+        isWaitingForAssistantTurnToFinish = waiting
+
+        if waiting {
+            recognizer.stopListening()
+        }
+    }
+
+    private func completeAssistantTurn(playCue: Bool) {
+        shouldResumeListeningAfterPlayback = false
+        setWaitingForAssistantTurn(false)
+
+        guard !isUserMuted else {
+            status = .muted
+            return
+        }
+
+        if playCue {
+            scheduleListeningResumeAfterUnmuteCue()
+        } else {
+            beginListeningIfPossible()
+        }
     }
 
     private var isFailedStatus: Bool {
@@ -470,19 +508,23 @@ final class VoiceSessionViewModel {
             queueSpeechIfNeeded(force: true)
             if playback.isSpeakingOrQueued {
                 status = .speaking
+            } else if activeTurnTask == nil {
+                completeAssistantTurn(playCue: true)
             } else {
-                beginListeningIfPossible()
+                status = .processing
             }
         case .toolStatus(let text):
-            appendTranscript(kind: .toolStatus, text: text)
             if RelayPreferences.shared.voiceSpeaksToolStatus {
                 playback.speak(
                     text,
                     rate: Float(RelayPreferences.shared.voiceSpeechRate),
+                    volume: Float(RelayPreferences.shared.voiceOutputVolume),
                     kind: .toolStatus
                 )
             }
         case .error(let message, _):
+            shouldResumeListeningAfterPlayback = false
+            setWaitingForAssistantTurn(false)
             latestErrorMessage = message
             appendTranscript(kind: .system, text: message)
             if !playback.isSpeakingOrQueued {
@@ -535,7 +577,7 @@ final class VoiceSessionViewModel {
 
         cancelSendCuePauseTask()
         clearDraftUserSpeech()
-        setMicrophoneMuted(true, playCue: false, clearDraft: false)
+        setWaitingForAssistantTurn(true)
         appendTranscript(kind: .user, text: trimmed)
         status = .processing
         shouldResumeListeningAfterPlayback = true
@@ -551,6 +593,8 @@ final class VoiceSessionViewModel {
                 }
             } catch {
                 guard !Task.isCancelled else { return }
+                self.shouldResumeListeningAfterPlayback = false
+                self.setWaitingForAssistantTurn(false)
                 let message = self.describe(error)
                 self.latestErrorMessage = message
                 self.status = .failed(message)
@@ -561,9 +605,9 @@ final class VoiceSessionViewModel {
                 self.activeTurnTask = nil
                 guard !self.isEnding, !self.isFailedStatus else { return }
                 if self.didReceiveAssistantDone && !self.playback.isSpeakingOrQueued {
-                    self.beginListeningIfPossible()
+                    self.completeAssistantTurn(playCue: true)
                 } else if !self.didReceiveAssistantDone && !Task.isCancelled {
-                    self.beginListeningIfPossible()
+                    self.completeAssistantTurn(playCue: false)
                 }
             }
         }
@@ -642,6 +686,7 @@ final class VoiceSessionViewModel {
             playback.speak(
                 chunk.text,
                 rate: Float(RelayPreferences.shared.voiceSpeechRate),
+                volume: Float(RelayPreferences.shared.voiceOutputVolume),
                 kind: .assistant
             )
 
