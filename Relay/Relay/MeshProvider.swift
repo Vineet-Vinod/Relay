@@ -79,19 +79,22 @@ struct SavedDevice: Identifiable, Hashable, Codable, Sendable {
     var hostname: String
     var port: Int
     var username: String
+    var defaultCodexPath: String?
 
     init(
         id: UUID = UUID(),
         name: String,
         hostname: String,
         port: Int = 22,
-        username: String
+        username: String,
+        defaultCodexPath: String? = nil
     ) {
         self.id = id
         self.name = name
         self.hostname = hostname
         self.port = port
         self.username = username
+        self.defaultCodexPath = defaultCodexPath
     }
 }
 
@@ -135,7 +138,8 @@ struct ManualDeviceProvider: MeshProvider {
             name: savedHost.name,
             hostname: savedHost.hostname,
             port: savedHost.port,
-            username: savedHost.username
+            username: savedHost.username,
+            defaultCodexPath: savedHost.defaultCodexPath
         )
     }
 

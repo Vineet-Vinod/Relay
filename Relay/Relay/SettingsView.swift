@@ -18,6 +18,9 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
+    @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
+    @AppStorage(RelayDefaultsKey.voiceOutputVolume) private var voiceOutputVolume = RelayVoicePreference.defaultOutputVolume
+    @AppStorage(RelayDefaultsKey.voiceSpeaksToolStatus) private var voiceSpeaksToolStatus = false
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
     @State private var storedKeys: [SSHStoredKeyRecord] = []
@@ -119,6 +122,38 @@ struct SettingsView: View {
                 Toggle("Reconnect Automatically", isOn: $automaticallyReconnect)
             } header: {
                 Text("Terminal")
+            }
+
+            Section {
+                Stepper(
+                    value: voiceSpeechSpeedBinding,
+                    in: RelayVoicePreference.minimumDisplaySpeed...RelayVoicePreference.maximumDisplaySpeed,
+                    step: RelayVoicePreference.displaySpeedStep
+                ) {
+                    settingsValueRow(
+                        title: "Voice Speed",
+                        value: voiceSpeechSpeedLabel,
+                        detail: nil
+                    )
+                }
+
+                Stepper(
+                    value: $voiceOutputVolume,
+                    in: RelayVoicePreference.minimumOutputVolume...RelayVoicePreference.maximumOutputVolume,
+                    step: RelayVoicePreference.outputVolumeStep
+                ) {
+                    settingsValueRow(
+                        title: "Voice Volume",
+                        value: RelayVoicePreference.outputVolumeLabel(for: voiceOutputVolume),
+                        detail: nil
+                    )
+                }
+
+                Toggle("Speak Tool Status", isOn: $voiceSpeaksToolStatus)
+            } header: {
+                Text("Voice")
+            } footer: {
+                Text("Relay uses on-device speech recognition and text-to-speech to keep Codex usable while the screen is not your primary focus. New voice calls start on the loudspeaker unless you pick another route.")
             }
 
             Section {
@@ -324,6 +359,17 @@ struct SettingsView: View {
         }
 
         return "\(clampedSize.formatted(.number.precision(.fractionLength(1)))) pt"
+    }
+
+    private var voiceSpeechSpeedBinding: Binding<Double> {
+        Binding(
+            get: { RelayVoicePreference.displaySpeed(forSpeechRate: voiceSpeechRate) },
+            set: { voiceSpeechRate = RelayVoicePreference.speechRate(forDisplaySpeed: $0) }
+        )
+    }
+
+    private var voiceSpeechSpeedLabel: String {
+        RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate)
     }
 
     private func overviewMetric(title: String, value: String) -> some View {

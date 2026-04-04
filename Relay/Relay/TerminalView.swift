@@ -17,10 +17,13 @@ struct TerminalView: View {
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
 
-    @State var viewModel: TerminalSessionViewModel
+    let viewModel: TerminalSessionViewModel
+    let isActive: Bool
     @State private var terminalBridge = RelayTerminalBridge()
     @State private var isShowingPasswordSheet = false
+    @State private var isShowingVoiceWorkspacePicker = false
     @State private var pendingReconnectHost: Host?
+    @State private var activeVoiceSession: VoiceSessionConfiguration?
     @State private var didAttemptConnection = false
     @State private var autoReconnectTask: Task<Void, Never>?
 
@@ -92,46 +95,41 @@ struct TerminalView: View {
                 .padding(.top, RelayTheme.Spacing.compact)
             }
         }
-        .navigationTitle(viewModel.host.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(palette.surfaceColor, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if viewModel.canReconnectWithPassword {
-                        Button("Use Password") {
-                            isShowingPasswordSheet = true
-                        }
-                    }
-
-                    if viewModel.isConnecting || viewModel.isConnected {
-                        Button(viewModel.isConnecting ? "Cancel Connection" : "Disconnect", role: .destructive) {
-                            Task {
-                                await viewModel.disconnect()
+            if isActive {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if viewModel.canReconnectWithPassword {
+                            Button("Use Password") {
+                                isShowingPasswordSheet = true
                             }
                         }
-                    } else {
-                        Button("Reconnect") {
-                            reconnectTerminal()
+
+                        Button("Talk to Codex") {
+                            isShowingVoiceWorkspacePicker = true
                         }
+
+                        if viewModel.isConnecting || viewModel.isConnected {
+                            Button(viewModel.isConnecting ? "Cancel Connection" : "Disconnect", role: .destructive) {
+                                Task {
+                                    await viewModel.disconnect()
+                                }
+                            }
+                        } else {
+                            Button("Reconnect") {
+                                reconnectTerminal()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(palette.textColor)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(palette.textColor)
                 }
             }
         }
         .alert(
             "Use an SSH key for future logins?",
-            isPresented: Binding(
-                get: { viewModel.isShowingKeySetupPrompt },
-                set: { isPresented in
-                    if !isPresented {
-                        viewModel.dismissSavedKeyPrompt()
-                    }
-                }
-            )
+            isPresented: savedKeyPromptBinding
         ) {
             Button("Not Now", role: .cancel) {
                 viewModel.dismissSavedKeyPrompt()
@@ -147,10 +145,7 @@ struct TerminalView: View {
         }
         .alert(
             "Verify SSH Host",
-            isPresented: Binding(
-                get: { viewModel.isShowingHostTrustPrompt },
-                set: { _ in }
-            )
+            isPresented: hostTrustPromptBinding
         ) {
             Button("Cancel", role: .cancel) {
                 viewModel.rejectPendingHostKey()
@@ -180,30 +175,71 @@ struct TerminalView: View {
                 }
             }
         }
+        .sheet(isPresented: $isShowingVoiceWorkspacePicker) {
+            VoiceWorkspacePickerView(
+                host: viewModel.host,
+                initialWorkspacePath: viewModel.host.defaultCodexPath ?? "",
+                supportsSavingDefault: false,
+                onCancel: {
+                    isShowingVoiceWorkspacePicker = false
+                },
+                onStart: { workspacePath, _ in
+                    var host = viewModel.host
+                    let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+                    host.defaultCodexPath = trimmedWorkspacePath
+                    isShowingVoiceWorkspacePicker = false
+                    activeVoiceSession = VoiceSessionConfiguration(
+                        host: host,
+                        workspacePath: trimmedWorkspacePath
+                    )
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(item: $activeVoiceSession) { configuration in
+            VoiceSessionView(configuration: configuration)
+        }
         .task {
             viewModel.onTerminalOutput = { bytes in
                 terminalBridge.feed(bytes)
             }
 
             didAttemptConnection = true
-            updateIdleTimer()
+            if isActive {
+                updateIdleTimer()
+            }
             if !viewModel.isConnected && !viewModel.isConnecting {
                 await viewModel.connect()
             }
         }
         .onChange(of: viewModel.isConnected) { _, isConnected in
-            updateIdleTimer()
+            if isActive {
+                updateIdleTimer()
+            }
             if isConnected {
                 autoReconnectTask?.cancel()
                 autoReconnectTask = nil
-                terminalBridge.focus()
+                if isActive {
+                    terminalBridge.focus()
+                }
             }
         }
         .onChange(of: viewModel.isConnecting) { _, _ in
-            updateIdleTimer()
+            if isActive {
+                updateIdleTimer()
+            }
         }
         .onChange(of: keepsScreenAwake) { _, _ in
+            if isActive {
+                updateIdleTimer()
+            }
+        }
+        .onChange(of: isActive) { _, isNowActive in
             updateIdleTimer()
+            if isNowActive, viewModel.isConnected {
+                terminalBridge.focus()
+            }
         }
         .onChange(of: viewModel.didDisconnectUnexpectedly) { _, didDisconnectUnexpectedly in
             guard didDisconnectUnexpectedly,
@@ -218,7 +254,9 @@ struct TerminalView: View {
         .onDisappear {
             autoReconnectTask?.cancel()
             autoReconnectTask = nil
-            UIApplication.shared.isIdleTimerDisabled = false
+            if isActive {
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
             Task {
                 await viewModel.disconnect()
             }
@@ -251,6 +289,24 @@ struct TerminalView: View {
         !viewModel.isConnecting &&
         viewModel.latestErrorMessage == nil &&
         !viewModel.isShowingHostTrustPrompt
+    }
+
+    private var savedKeyPromptBinding: Binding<Bool> {
+        Binding(
+            get: { isActive && viewModel.isShowingKeySetupPrompt },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.dismissSavedKeyPrompt()
+                }
+            }
+        )
+    }
+
+    private var hostTrustPromptBinding: Binding<Bool> {
+        Binding(
+            get: { isActive && viewModel.isShowingHostTrustPrompt },
+            set: { _ in }
+        )
     }
 
     private func handlePrimaryRecoveryAction() {
@@ -299,7 +355,7 @@ struct TerminalView: View {
     }
 
     private func updateIdleTimer() {
-        UIApplication.shared.isIdleTimerDisabled = keepsScreenAwake && (viewModel.isConnected || viewModel.isConnecting)
+        UIApplication.shared.isIdleTimerDisabled = keepsScreenAwake && isActive && (viewModel.isConnected || viewModel.isConnecting)
     }
 }
 
