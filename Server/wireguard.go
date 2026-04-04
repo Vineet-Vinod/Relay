@@ -21,13 +21,12 @@ import (
 var errInterfaceUnavailable = errors.New("wireguard interface unavailable")
 
 type WireGuardManager struct {
-	cfg             AppConfig
-	logger          *log.Logger
-	privateKeyPath  string
-	privateKey      string
-	publicKey       string
-	quickConfigPath string
-	syncConfigPath  string
+	cfg            AppConfig
+	logger         *log.Logger
+	privateKeyPath string
+	privateKey     string
+	publicKey      string
+	syncConfigPath string
 
 	mu            sync.Mutex
 	realInterface string
@@ -44,6 +43,9 @@ func NewWireGuardManager(cfg AppConfig, logger *log.Logger) (*WireGuardManager, 
 	if _, err := exec.LookPath("wg"); err != nil {
 		return nil, fmt.Errorf("wg not found in PATH")
 	}
+	if _, err := exec.LookPath("wireguard-go"); err != nil {
+		return nil, fmt.Errorf("wireguard-go not found in PATH")
+	}
 
 	privateKeyPath := filepath.Join(cfg.StateDir, "server.key")
 	privateKey, publicKey, err := loadOrCreateServerKeypair(privateKeyPath)
@@ -52,13 +54,12 @@ func NewWireGuardManager(cfg AppConfig, logger *log.Logger) (*WireGuardManager, 
 	}
 
 	return &WireGuardManager{
-		cfg:             cfg,
-		logger:          logger,
-		privateKeyPath:  privateKeyPath,
-		privateKey:      privateKey,
-		publicKey:       publicKey,
-		quickConfigPath: filepath.Join(cfg.StateDir, cfg.InterfaceName+".conf"),
-		syncConfigPath:  filepath.Join(cfg.StateDir, cfg.InterfaceName+".setconf"),
+		cfg:            cfg,
+		logger:         logger,
+		privateKeyPath: privateKeyPath,
+		privateKey:     privateKey,
+		publicKey:      publicKey,
+		syncConfigPath: filepath.Join(cfg.StateDir, cfg.InterfaceName+".setconf"),
 	}, nil
 }
 
@@ -233,20 +234,6 @@ func (m *WireGuardManager) ensureInterfaceUpLocked() error {
 }
 
 func (m *WireGuardManager) createInterfaceLocked() error {
-	if _, err := exec.LookPath("wg-quick"); err == nil {
-		if err := m.writeWGQuickConfigLocked(nil); err != nil {
-			return err
-		}
-		if _, err := runCommand("wg-quick", "up", m.quickConfigPath); err != nil {
-			return fmt.Errorf("wg-quick up: %w", err)
-		}
-		return nil
-	}
-
-	if _, err := exec.LookPath("wireguard-go"); err != nil {
-		return fmt.Errorf("neither wg-quick nor wireguard-go is installed")
-	}
-
 	if err := os.MkdirAll("/var/run/wireguard", 0o755); err != nil {
 		return fmt.Errorf("create /var/run/wireguard: %w", err)
 	}
@@ -353,39 +340,12 @@ func (m *WireGuardManager) writeSyncConfigLocked(peers []Peer) error {
 	return nil
 }
 
-func (m *WireGuardManager) writeWGQuickConfigLocked(peers []Peer) error {
-	config := m.renderWGQuickConfig(peers)
-	if err := os.WriteFile(m.quickConfigPath, []byte(config), 0o600); err != nil {
-		return fmt.Errorf("write wg-quick config: %w", err)
-	}
-	return nil
-}
-
 func (m *WireGuardManager) renderSetConf(peers []Peer) string {
 	var builder strings.Builder
 
 	builder.WriteString("[Interface]\n")
 	builder.WriteString("PrivateKey = " + m.privateKey + "\n")
 	builder.WriteString("ListenPort = " + strconv.Itoa(m.cfg.ListenPort) + "\n")
-
-	for _, peer := range peers {
-		builder.WriteString("\n[Peer]\n")
-		builder.WriteString("PublicKey = " + peer.PublicKey + "\n")
-		builder.WriteString("AllowedIPs = " + peer.AssignedIP + "/32\n")
-		builder.WriteString("PersistentKeepalive = " + strconv.Itoa(m.cfg.PersistentKeepalive) + "\n")
-	}
-
-	return builder.String()
-}
-
-func (m *WireGuardManager) renderWGQuickConfig(peers []Peer) string {
-	var builder strings.Builder
-
-	builder.WriteString("[Interface]\n")
-	builder.WriteString("PrivateKey = " + m.privateKey + "\n")
-	builder.WriteString("Address = " + m.cfg.InterfaceAddress + "\n")
-	builder.WriteString("ListenPort = " + strconv.Itoa(m.cfg.ListenPort) + "\n")
-	builder.WriteString("SaveConfig = false\n")
 
 	for _, peer := range peers {
 		builder.WriteString("\n[Peer]\n")

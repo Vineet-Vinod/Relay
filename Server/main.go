@@ -23,7 +23,7 @@ const (
 	defaultWireGuardAddress    = "10.0.0.1/24"
 	defaultWireGuardListenPort = 51820
 	defaultPersistentKeepalive = 25
-	defaultStateDir            = "./state"
+	defaultStateDir            = "./.state"
 )
 
 type AppConfig struct {

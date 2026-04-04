@@ -4,7 +4,7 @@ Minimal centralized WireGuard control server for macOS.
 
 ## What It Does
 
-- Brings up a WireGuard interface named `wg0` on macOS.
+- Uses a logical WireGuard interface name of `wg0` and resolves the real macOS `utunX` interface created by `wireguard-go`.
 - Applies outbound NAT with `pfctl`.
 - Tracks peers in memory and auto-assigns `10.0.0.x` addresses.
 - Exposes an HTTP API for registration, inspection, and client config templates.
@@ -15,7 +15,7 @@ Minimal centralized WireGuard control server for macOS.
 - macOS host
 - root privileges
 - `wg`
-- `wg-quick` or `wireguard-go`
+- `wireguard-go`
 - `pfctl`
 
 ## Install WireGuard Tools
@@ -30,7 +30,6 @@ Verify:
 
 ```bash
 which wg
-which wg-quick
 which wireguard-go
 ```
 
@@ -54,10 +53,12 @@ export RELAY_WG_LISTEN_PORT="51820"
 export RELAY_PERSISTENT_KEEPALIVE="25"
 export RELAY_SERVER_ENDPOINT="YOUR_PUBLIC_IP_OR_DNS:51820"
 export RELAY_EGRESS_INTERFACE="en0"
-export RELAY_STATE_DIR="./state"
+export RELAY_STATE_DIR="./.state"
 ```
 
 If `RELAY_SERVER_ENDPOINT` is not set, the server uses the detected IPv4 address of the active default-route interface.
+
+The server does not use `wg-quick` on macOS. It starts `wireguard-go utun`, resolves the real interface name from `WG_TUN_NAME_FILE`, applies configuration with `wg`, and assigns `10.0.0.1/24` with `ifconfig`.
 
 ## Register A Peer
 
@@ -127,9 +128,22 @@ sysctl net.inet.ip.forwarding
 On the client:
 
 ```bash
-sudo wg-quick up client.conf
 curl https://ifconfig.me
 ping 10.0.0.1
+```
+
+For iPhone testing, import `client.conf` into the official WireGuard app and activate the tunnel there.
+
+For macOS client testing without `wg-quick`:
+
+```bash
+mkdir -p /var/run/wireguard
+export WG_TUN_NAME_FILE=/var/run/wireguard/client.name
+sudo wireguard-go utun
+CLIENT_IF=$(sudo cat /var/run/wireguard/client.name)
+sudo wg setconf "$CLIENT_IF" client.conf
+sudo ifconfig "$CLIENT_IF" inet 10.0.0.2/24 10.0.0.2 alias
+sudo ifconfig "$CLIENT_IF" up
 ```
 
 You should see:
