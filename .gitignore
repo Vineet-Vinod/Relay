@@ -3,6 +3,7 @@
 xcuserdata/
 
 ### Relay Backend ###
+Server/.env
 Server/data/
 Server/certs/
 Server/server

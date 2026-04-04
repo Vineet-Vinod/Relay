@@ -10,6 +10,10 @@ import (
 func main() {
 	logger := log.New(os.Stdout, "relay-server ", log.LstdFlags|log.Lmicroseconds)
 
+	if err := loadDotEnv(defaultEnvFilePath()); err != nil {
+		logger.Fatalf("load .env: %v", err)
+	}
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		logger.Fatalf("load config: %v", err)

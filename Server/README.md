@@ -14,6 +14,8 @@ Relay now uses an HTTPS and WebSocket relay instead of WireGuard. The Swift app 
 
 The server requires HTTPS. For local development, use a self-signed or `mkcert` certificate and enable `Allow Self-Signed TLS` in the Relay app and `--allow-insecure-tls` in the Mac agent.
 
+The server auto-loads `Server/.env` on startup. Environment variables already set in the shell still win over `.env`.
+
 Required variables:
 
 - `RELAY_PUBLIC_URL`
@@ -47,12 +49,24 @@ Replace `192.168.1.10` with the LAN IP of the Mac running the server.
 ```bash
 cd /Users/matthew/Projects/Catapult26/Relay/Server
 chmod +x scripts/start-relay-dev.sh
+cp .env.example .env
+```
 
-RELAY_PUBLIC_URL="https://192.168.1.10:8443" \
-RELAY_TLS_CERT_FILE="$PWD/certs/relay-cert.pem" \
-RELAY_TLS_KEY_FILE="$PWD/certs/relay-key.pem" \
+Edit `Server/.env`:
+
+```dotenv
+RELAY_PUBLIC_URL=https://192.168.1.10:8443
+RELAY_TLS_CERT_FILE=./certs/relay-cert.pem
+RELAY_TLS_KEY_FILE=./certs/relay-key.pem
+```
+
+Then run:
+
+```bash
 ./scripts/start-relay-dev.sh
 ```
+
+If you want a different file path, set `RELAY_ENV_FILE` before starting the server.
 
 3. Pair the iPhone app.
 
