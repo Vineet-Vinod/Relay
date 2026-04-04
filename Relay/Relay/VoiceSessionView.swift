@@ -10,7 +10,8 @@ import UIKit
 
 struct VoiceSessionView: View {
     private static let promptEditorMinHeight = ceil(TerminalFontRegistry.terminalFont(size: 16, bold: false).lineHeight)
-    private static let promptEditorMaxHeight: CGFloat = 118
+    private static let promptEditorMaxHeight: CGFloat = 126
+    private static let promptEditorVerticalPadding: CGFloat = 10
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -225,7 +226,11 @@ struct VoiceSessionView: View {
             .background(Color.clear)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .relayTerminalFieldBackground(palette, isFocused: isPromptFieldFocused || viewModel.status == .listening)
+        .relayTerminalFieldBackground(
+            palette,
+            isFocused: isPromptFieldFocused || viewModel.status == .listening,
+            verticalPadding: Self.promptEditorVerticalPadding
+        )
         .contentShape(RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous))
         .onTapGesture {
             isPromptFieldFocused = true
@@ -612,6 +617,8 @@ struct VoiceWorkspacePickerView: View {
 }
 
 private struct VoiceTranscriptRow: View {
+    private static let messageCardMaxWidth: CGFloat = 540
+
     let item: VoiceTranscriptItem
     let palette: RelayTerminalPalette
 
@@ -641,17 +648,34 @@ private struct VoiceTranscriptRow: View {
 
     private var messageRow: some View {
         VStack(alignment: messageAlignment, spacing: 6) {
-            Text(label.uppercased())
-                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 11, bold: true))
+            HStack(alignment: .firstTextBaseline, spacing: RelayTheme.Spacing.tight) {
+                HStack(spacing: 6) {
+                    Image(systemName: labelSymbolName)
+                        .font(.system(size: 10, weight: .semibold))
+
+                    Text(label.uppercased())
+                        .font(TerminalFontRegistry.terminalSwiftUIFont(size: 11, bold: true))
+                }
                 .foregroundStyle(metadataColor)
+
+                Spacer(minLength: RelayTheme.Spacing.tight)
+
+                Text(item.createdAt, format: .dateTime.hour().minute())
+                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 11))
+                    .foregroundStyle(palette.mutedColor.opacity(0.8))
+                    .monospacedDigit()
+            }
 
             Text(item.text)
                 .font(font)
                 .foregroundStyle(textColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(item.kind == .user ? .trailing : .leading)
+                .lineSpacing(item.kind == .assistant ? 3 : 2)
                 .frame(maxWidth: .infinity, alignment: rowAlignment)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(
             RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
                 .fill(backgroundColor)
@@ -660,33 +684,54 @@ private struct VoiceTranscriptRow: View {
             RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
                 .stroke(borderColor, lineWidth: 1)
         )
+        .overlay(alignment: messageAccentAlignment) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(messageAccentColor)
+                .frame(width: 3)
+                .padding(.vertical, 12)
+                .opacity(0.95)
+        }
+        .frame(maxWidth: Self.messageCardMaxWidth, alignment: rowAlignment)
         .frame(maxWidth: .infinity, alignment: rowAlignment)
-        .padding(.leading, item.kind == .user ? 56 : 0)
-        .padding(.trailing, item.kind == .assistant ? 56 : 0)
+        .padding(.leading, item.kind == .user ? 68 : 0)
+        .padding(.trailing, item.kind == .assistant ? 44 : 0)
     }
 
     private var statusRow: some View {
         HStack(alignment: .top, spacing: RelayTheme.Spacing.tight) {
-            Image(systemName: labelSymbolName)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(statusAccentColor)
-                .padding(.top, 1)
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(statusAccentColor.opacity(0.14))
 
-            Text(item.text)
-                .font(.footnote)
-                .foregroundStyle(palette.mutedColor)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: labelSymbolName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusAccentColor)
+            }
+            .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label.uppercased())
+                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 10, bold: true))
+                    .foregroundStyle(statusAccentColor.opacity(0.95))
+
+                Text(item.text)
+                    .font(.footnote)
+                    .foregroundStyle(palette.mutedColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(palette.surfaceColor.opacity(0.55))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(palette.surfaceColor.opacity(0.7))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(palette.subtleColor.opacity(0.55), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(palette.subtleColor.opacity(0.6), lineWidth: 1)
         )
+        .frame(maxWidth: Self.messageCardMaxWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -721,11 +766,11 @@ private struct VoiceTranscriptRow: View {
     }
 
     private var backgroundColor: Color {
-        item.kind == .user ? palette.accentColor.opacity(0.12) : palette.raisedColor
+        item.kind == .user ? palette.accentColor.opacity(0.11) : palette.raisedColor
     }
 
     private var borderColor: Color {
-        item.kind == .user ? palette.accentColor.opacity(0.28) : palette.subtleColor.opacity(0.65)
+        item.kind == .user ? palette.accentColor.opacity(0.34) : palette.subtleColor.opacity(0.72)
     }
 
     private var textColor: Color {
@@ -733,11 +778,26 @@ private struct VoiceTranscriptRow: View {
     }
 
     private var metadataColor: Color {
-        item.kind == .user ? palette.accentColor : palette.mutedColor
+        switch item.kind {
+        case .user:
+            return palette.accentColor
+        case .assistant:
+            return palette.accentColor.opacity(0.88)
+        case .toolStatus, .system:
+            return palette.mutedColor
+        }
+    }
+
+    private var messageAccentAlignment: Alignment {
+        item.kind == .user ? .trailing : .leading
+    }
+
+    private var messageAccentColor: Color {
+        item.kind == .user ? palette.accentColor : palette.accentColor.opacity(0.7)
     }
 
     private var statusAccentColor: Color {
-        item.kind == .system ? palette.warningColor : palette.mutedColor
+        item.kind == .system ? palette.warningColor : palette.accentColor
     }
 }
 
@@ -894,6 +954,10 @@ private struct VoicePromptEditor: UIViewRepresentable {
     }
 
     private func measuredContentHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
+        if (textView.text ?? "").isEmpty {
+            return ceil(textView.font?.lineHeight ?? minHeight)
+        }
+
         let previousScrollEnabled = textView.isScrollEnabled
         if previousScrollEnabled {
             textView.isScrollEnabled = false

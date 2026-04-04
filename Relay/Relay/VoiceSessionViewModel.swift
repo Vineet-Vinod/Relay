@@ -95,7 +95,7 @@ final class VoiceSessionViewModel {
     private var activeTurnTask: Task<Void, Never>?
     private var muteTransitionTask: Task<Void, Never>?
     private var sendCuePauseTask: Task<Void, Never>?
-    private var assistantSpeechBuffer = ""
+    private var assistantOutputBuffer = ""
     private var didReceiveAssistantDone = false
     private var shouldResumeListeningAfterPlayback = false
     private var typedDraftSpeech = ""
@@ -281,7 +281,7 @@ final class VoiceSessionViewModel {
         cancelSendCuePauseTask()
         recognizer.stopListening()
         playback.stop()
-        assistantSpeechBuffer.removeAll(keepingCapacity: true)
+        assistantOutputBuffer.removeAll(keepingCapacity: true)
         shouldResumeListeningAfterPlayback = false
         isWaitingForAssistantTurnToFinish = false
         clearDraftUserSpeech()
@@ -556,9 +556,8 @@ final class VoiceSessionViewModel {
             break
         case .assistantDelta(let text):
             latestErrorMessage = nil
-            appendAssistantTranscript(text)
-            bufferAssistantDelta(text)
-            queueSpeechIfNeeded(force: false)
+            bufferAssistantOutput(text)
+            flushAssistantOutput(force: false)
             if playback.isSpeakingOrQueued {
                 status = .speaking
             } else {
@@ -566,7 +565,7 @@ final class VoiceSessionViewModel {
             }
         case .assistantDone:
             didReceiveAssistantDone = true
-            queueSpeechIfNeeded(force: true)
+            flushAssistantOutput(force: true)
             if playback.isSpeakingOrQueued {
                 status = .speaking
             } else if activeTurnTask == nil {
@@ -595,25 +594,12 @@ final class VoiceSessionViewModel {
         }
     }
 
-    private func bufferAssistantDelta(_ text: String) {
+    private func bufferAssistantOutput(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        let separator = assistantSpeechBuffer.isEmpty || trimmed.hasPrefix("\n") ? "" : " "
-        assistantSpeechBuffer += separator + trimmed
-    }
-
-    private func appendAssistantTranscript(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        if let lastIndex = transcript.lastIndex(where: { $0.kind == .assistant }),
-           lastIndex == transcript.indices.last {
-            let prefix = transcript[lastIndex].text.hasSuffix("\n") || trimmed.hasPrefix("\n") ? "" : " "
-            transcript[lastIndex].text += prefix + trimmed
-        } else {
-            transcript.append(VoiceTranscriptItem(kind: .assistant, text: trimmed))
-        }
+        let separator = assistantOutputBuffer.isEmpty || trimmed.hasPrefix("\n") ? "" : " "
+        assistantOutputBuffer += separator + trimmed
     }
 
     private func appendTranscript(kind: VoiceTranscriptItem.Kind, text: String) {
@@ -649,7 +635,7 @@ final class VoiceSessionViewModel {
         status = .processing
         shouldResumeListeningAfterPlayback = true
         didReceiveAssistantDone = false
-        assistantSpeechBuffer.removeAll(keepingCapacity: true)
+        assistantOutputBuffer.removeAll(keepingCapacity: true)
 
         activeTurnTask = Task { [weak self] in
             guard let self else { return }
@@ -747,10 +733,11 @@ final class VoiceSessionViewModel {
         sendCuePauseTask = nil
     }
 
-    private func queueSpeechIfNeeded(force: Bool) {
-        while let chunk = nextSpeechChunk(from: assistantSpeechBuffer, force: force) {
-            assistantSpeechBuffer.removeFirst(chunk.consumedCharacterCount)
-            assistantSpeechBuffer = assistantSpeechBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func flushAssistantOutput(force: Bool) {
+        while let chunk = nextAssistantOutputChunk(from: assistantOutputBuffer, force: force) {
+            assistantOutputBuffer.removeFirst(chunk.consumedCharacterCount)
+            assistantOutputBuffer = assistantOutputBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            appendTranscript(kind: .assistant, text: chunk.text)
             playback.speak(
                 chunk.text,
                 rate: Float(RelayPreferences.shared.voiceSpeechRate),
@@ -764,7 +751,7 @@ final class VoiceSessionViewModel {
         }
     }
 
-    private func nextSpeechChunk(from buffer: String, force: Bool) -> (text: String, consumedCharacterCount: Int)? {
+    private func nextAssistantOutputChunk(from buffer: String, force: Bool) -> (text: String, consumedCharacterCount: Int)? {
         guard let contentStart = buffer.firstIndex(where: { !$0.isWhitespace && !$0.isNewline }) else {
             return nil
         }
@@ -784,7 +771,7 @@ final class VoiceSessionViewModel {
             return (chunk, consumedCount)
         }
 
-        let maxChunkLength = 140
+        let maxChunkLength = 110
         let remainingCount = buffer.distance(from: contentStart, to: buffer.endIndex)
         guard remainingCount >= maxChunkLength else { return nil }
 

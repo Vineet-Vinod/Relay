@@ -143,11 +143,16 @@ extension View {
             )
     }
 
-    func relayTerminalFieldBackground(_ palette: RelayTerminalPalette, isFocused: Bool) -> some View {
+    func relayTerminalFieldBackground(
+        _ palette: RelayTerminalPalette,
+        isFocused: Bool,
+        horizontalPadding: CGFloat = 14,
+        verticalPadding: CGFloat = 16
+    ) -> some View {
         self
             .font(TerminalFontRegistry.terminalSwiftUIFont(size: 16))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 16)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
             .background(
                 RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
                     .fill(palette.raisedColor)
