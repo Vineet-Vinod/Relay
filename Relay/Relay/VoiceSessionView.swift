@@ -9,6 +9,9 @@ import SwiftUI
 import UIKit
 
 struct VoiceSessionView: View {
+    private static let promptEditorMinHeight = ceil(TerminalFontRegistry.terminalFont(size: 16, bold: false).lineHeight)
+    private static let promptEditorMaxHeight: CGFloat = 118
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -18,7 +21,7 @@ struct VoiceSessionView: View {
     @State private var isPresentingAudioRoutes = false
     @State private var isPresentingVoiceSettings = false
     @State private var viewModel: VoiceSessionViewModel
-    @FocusState private var isPromptFieldFocused: Bool
+    @State private var isPromptFieldFocused = false
 
     init(configuration: VoiceSessionConfiguration) {
         _viewModel = State(initialValue: VoiceSessionViewModel(configuration: configuration))
@@ -86,8 +89,21 @@ struct VoiceSessionView: View {
         .onChange(of: viewModel.status) { _, _ in
             updateIdleTimer()
         }
+        .onChange(of: viewModel.shouldShowPromptComposer) { _, shouldShowPromptComposer in
+            if !shouldShowPromptComposer {
+                isPromptFieldFocused = false
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
+                if viewModel.canSendCurrentTurn {
+                    Button("Send") {
+                        viewModel.finishCurrentTurn()
+                        isPromptFieldFocused = false
+                    }
+                    .fontWeight(.semibold)
+                }
+
                 Spacer()
 
                 Button("Done") {
@@ -130,8 +146,10 @@ struct VoiceSessionView: View {
             transcriptPanel(palette: palette)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            composerPanel(palette: palette)
-                .padding(.horizontal, 18)
+            if viewModel.shouldShowPromptComposer {
+                composerPanel(palette: palette)
+                    .padding(.horizontal, 18)
+            }
         }
     }
 
@@ -139,7 +157,7 @@ struct VoiceSessionView: View {
         let bottomAnchorID = "voice-transcript-bottom"
 
         return ScrollViewReader { proxy in
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: RelayTheme.Spacing.tight) {
                     ForEach(viewModel.transcript) { item in
                         VoiceTranscriptRow(item: item, palette: palette)
@@ -157,6 +175,7 @@ struct VoiceSessionView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 8)
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: viewModel.transcript.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(bottomAnchorID, anchor: .bottom)
@@ -181,36 +200,31 @@ struct VoiceSessionView: View {
     }
 
     private func composerPanel(palette: RelayTerminalPalette) -> some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-            HStack(alignment: .top, spacing: RelayTheme.Spacing.tight) {
-                Text(">")
-                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 15, bold: true))
-                    .foregroundStyle(isPromptFieldFocused || viewModel.status == .listening ? palette.accentColor : palette.mutedColor)
-                    .padding(.top, 3)
-
-                Spacer(minLength: 0)
-
-                promptStatusChip(palette: palette)
+        ZStack(alignment: .topLeading) {
+            if viewModel.draftUserSpeech.isEmpty {
+                Text("Speak or type a prompt")
+                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 16))
+                    .foregroundStyle(palette.mutedColor.opacity(0.78))
+                    .padding(.leading, 1)
+                    .padding(.top, 1)
+                    .allowsHitTesting(false)
             }
 
-            TextField("Speak or type a prompt", text: promptDraftBinding, axis: .vertical)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($isPromptFieldFocused)
-                .submitLabel(.send)
-                .lineLimit(1...6)
-                .onSubmit {
-                    guard viewModel.canSendCurrentTurn else { return }
-                    viewModel.finishCurrentTurn()
-                    isPromptFieldFocused = false
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(promptHint)
-                .font(.caption2)
-                .foregroundStyle(palette.mutedColor)
-                .fixedSize(horizontal: false, vertical: true)
+            VoicePromptEditor(
+                text: promptDraftBinding,
+                isFocused: $isPromptFieldFocused,
+                minHeight: Self.promptEditorMinHeight,
+                maxHeight: Self.promptEditorMaxHeight,
+                palette: palette
+            )
+            .frame(
+                minHeight: Self.promptEditorMinHeight,
+                maxHeight: Self.promptEditorMaxHeight,
+                alignment: .topLeading
+            )
+            .background(Color.clear)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .relayTerminalFieldBackground(palette, isFocused: isPromptFieldFocused || viewModel.status == .listening)
         .contentShape(RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous))
         .onTapGesture {
@@ -225,217 +239,18 @@ struct VoiceSessionView: View {
         )
     }
 
-    private var promptHint: String {
-        switch viewModel.status {
-        case .ready:
-            return "Speak naturally or tap here to type before sending."
-        case .listening:
-            return "Listening for your next turn."
-        case .muted:
-            return "Microphone is muted. Tap here if you want to type instead."
-        case .processing:
-            return "Sending your turn to Codex."
-        case .speaking:
-            return "Codex is responding."
-        case .preparing:
-            return "Preparing the remote bridge."
-        case .ended:
-            return "Session ended."
-        case .failed(let message):
-            return message
-        }
-    }
-
-    @ViewBuilder
-    private func promptStatusChip(palette: RelayTerminalPalette) -> some View {
-        Label(promptStatusText, systemImage: promptStatusSymbol)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(promptStatusColor(palette: palette))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(promptStatusColor(palette: palette).opacity(0.14))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(promptStatusColor(palette: palette).opacity(0.24), lineWidth: 1)
-            )
-    }
-
-    private var promptStatusText: String {
-        if isPromptFieldFocused {
-            return "Type"
-        }
-
-        switch viewModel.status {
-        case .listening:
-            return "Live"
-        case .muted:
-            return "Muted"
-        case .processing:
-            return "Sending"
-        case .speaking:
-            return "Codex"
-        case .preparing:
-            return "Starting"
-        case .ended:
-            return "Ended"
-        case .failed:
-            return "Alert"
-        case .ready:
-            return "Voice"
-        }
-    }
-
-    private var promptStatusSymbol: String {
-        if isPromptFieldFocused {
-            return "keyboard"
-        }
-
-        switch viewModel.status {
-        case .listening:
-            return "waveform"
-        case .muted:
-            return "mic.slash"
-        case .processing:
-            return "arrow.up"
-        case .speaking:
-            return "speaker.wave.2"
-        case .preparing:
-            return "ellipsis"
-        case .ended:
-            return "phone.down"
-        case .failed:
-            return "exclamationmark.triangle"
-        case .ready:
-            return "mic"
-        }
-    }
-
-    private func promptStatusColor(palette: RelayTerminalPalette) -> Color {
-        if isPromptFieldFocused {
-            return palette.accentColor
-        }
-
-        switch viewModel.status {
-        case .failed:
-            return palette.warningColor
-        case .muted:
-            return palette.warningColor
-        case .ended:
-            return palette.mutedColor
-        default:
-            return palette.accentColor
-        }
-    }
-
     private func controls(palette: RelayTerminalPalette) -> some View {
-        VStack(spacing: RelayTheme.Spacing.content) {
-            LazyVGrid(columns: controlColumns, alignment: .center, spacing: 18) {
-                Button {
-                    isPresentingAudioRoutes = true
-                } label: {
-                    VoicePhoneControlButton(
-                        title: viewModel.selectedAudioRoute.name,
-                        subtitle: nil,
-                        systemImage: viewModel.selectedAudioRoute.systemImage,
-                        palette: palette,
-                        accentColor: palette.accentColor,
-                        isActive: false,
-                        usesSolidAccentFillWhenActive: false,
-                        isDisabled: false
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Audio output")
-                .accessibilityValue(viewModel.selectedAudioRoute.name)
+        VStack(spacing: RelayTheme.Spacing.section) {
+            HStack(spacing: RelayTheme.Spacing.section) {
+                audioRouteButton(palette: palette)
+                muteButton(palette: palette)
+                sendButton(palette: palette)
+            }
 
-                Button {
-                    viewModel.toggleMute()
-                } label: {
-                    VoicePhoneControlButton(
-                        title: viewModel.isMuted ? "Unmute" : "Mute",
-                        subtitle: nil,
-                        systemImage: viewModel.isMuted ? "mic.slash.fill" : "mic.fill",
-                        palette: palette,
-                        accentColor: palette.warningColor,
-                        isActive: viewModel.isMuted,
-                        usesSolidAccentFillWhenActive: false,
-                        isDisabled: false
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    viewModel.finishCurrentTurn()
-                    isPromptFieldFocused = false
-                } label: {
-                    VoicePhoneControlButton(
-                        title: "Send",
-                        subtitle: nil,
-                        systemImage: "arrow.up.circle.fill",
-                        palette: palette,
-                        accentColor: palette.accentColor,
-                        isActive: viewModel.canSendCurrentTurn,
-                        usesSolidAccentFillWhenActive: false,
-                        isDisabled: !viewModel.canSendCurrentTurn
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canSendCurrentTurn)
-
-                Button {
-                    viewModel.fastForwardPlayback()
-                } label: {
-                    VoicePhoneControlButton(
-                        title: "Skip",
-                        subtitle: nil,
-                        systemImage: "forward.end.fill",
-                        palette: palette,
-                        accentColor: palette.accentColor,
-                        isActive: false,
-                        usesSolidAccentFillWhenActive: false,
-                        isDisabled: !viewModel.canFastForward
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canFastForward)
-                .accessibilityLabel("Fast forward speech")
-
-                Button {
-                    viewModel.interrupt()
-                } label: {
-                    VoicePhoneControlButton(
-                        title: "Stop",
-                        subtitle: nil,
-                        systemImage: "waveform.badge.xmark",
-                        palette: palette,
-                        accentColor: palette.accentColor,
-                        isActive: false,
-                        usesSolidAccentFillWhenActive: false,
-                        isDisabled: !viewModel.canInterrupt
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canInterrupt)
-
-                Button {
-                    dismiss()
-                } label: {
-                    VoicePhoneControlButton(
-                        title: "End",
-                        subtitle: nil,
-                        systemImage: "phone.down.fill",
-                        palette: palette,
-                        accentColor: palette.dangerColor,
-                        isActive: true,
-                        usesSolidAccentFillWhenActive: true,
-                        isDisabled: false
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("End voice session")
+            HStack(spacing: RelayTheme.Spacing.section) {
+                skipButton(palette: palette)
+                endButton(palette: palette)
+                stopButton(palette: palette)
             }
         }
         .padding(.horizontal, 20)
@@ -452,8 +267,120 @@ struct VoiceSessionView: View {
         )
     }
 
-    private var controlColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: RelayTheme.Spacing.section), count: 3)
+    private func audioRouteButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            isPresentingAudioRoutes = true
+        } label: {
+            VoicePhoneControlButton(
+                title: viewModel.selectedAudioRoute.name,
+                subtitle: nil,
+                systemImage: viewModel.selectedAudioRoute.systemImage,
+                palette: palette,
+                accentColor: palette.accentColor,
+                isActive: false,
+                usesSolidAccentFillWhenActive: false,
+                isDisabled: false
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Audio output")
+        .accessibilityValue(viewModel.selectedAudioRoute.name)
+    }
+
+    private func muteButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            viewModel.toggleMute()
+        } label: {
+            VoicePhoneControlButton(
+                title: viewModel.isMuted ? "Unmute" : "Mute",
+                subtitle: nil,
+                systemImage: viewModel.isMuted ? "mic.slash.fill" : "mic.fill",
+                palette: palette,
+                accentColor: palette.warningColor,
+                isActive: viewModel.isMuted,
+                usesSolidAccentFillWhenActive: false,
+                isDisabled: false
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sendButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            viewModel.finishCurrentTurn()
+            isPromptFieldFocused = false
+        } label: {
+            VoicePhoneControlButton(
+                title: "Send",
+                subtitle: nil,
+                systemImage: "arrow.up.circle.fill",
+                palette: palette,
+                accentColor: palette.accentColor,
+                isActive: viewModel.canSendCurrentTurn,
+                usesSolidAccentFillWhenActive: false,
+                isDisabled: !viewModel.canSendCurrentTurn
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!viewModel.canSendCurrentTurn)
+    }
+
+    private func skipButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            viewModel.fastForwardPlayback()
+        } label: {
+            VoicePhoneControlButton(
+                title: "Skip",
+                subtitle: nil,
+                systemImage: "forward.end.fill",
+                palette: palette,
+                accentColor: palette.accentColor,
+                isActive: false,
+                usesSolidAccentFillWhenActive: false,
+                isDisabled: !viewModel.canFastForward
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!viewModel.canFastForward)
+        .accessibilityLabel("Fast forward speech")
+    }
+
+    private func endButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            dismiss()
+        } label: {
+            VoicePhoneControlButton(
+                title: "End",
+                subtitle: nil,
+                systemImage: "phone.down.fill",
+                palette: palette,
+                accentColor: palette.dangerColor,
+                isActive: true,
+                usesSolidAccentFillWhenActive: true,
+                isDisabled: false
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("End voice session")
+    }
+
+    private func stopButton(palette: RelayTerminalPalette) -> some View {
+        Button {
+            viewModel.interrupt()
+        } label: {
+            VoicePhoneControlButton(
+                title: "Stop",
+                subtitle: nil,
+                systemImage: "waveform.badge.xmark",
+                palette: palette,
+                accentColor: palette.accentColor,
+                isActive: false,
+                usesSolidAccentFillWhenActive: false,
+                isDisabled: !viewModel.canInterrupt
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!viewModel.canInterrupt)
     }
 
     private func bottomTrayHeight(for availableHeight: CGFloat) -> CGFloat {
@@ -836,6 +763,164 @@ private struct VoiceTranscriptActivityRow: View {
             Spacer(minLength: 0)
         }
         .padding(.trailing, 56)
+    }
+}
+
+private struct VoicePromptEditor: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+
+    let minHeight: CGFloat
+    let maxHeight: CGFloat
+    let palette: RelayTerminalPalette
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: $isFocused)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.backgroundColor = .clear
+        textView.textColor = palette.text
+        textView.tintColor = palette.accent
+        textView.font = TerminalFontRegistry.terminalFont(size: 16, bold: false)
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.isScrollEnabled = false
+        textView.keyboardDismissMode = .interactive
+        textView.alwaysBounceVertical = false
+        textView.showsVerticalScrollIndicator = false
+        textView.showsHorizontalScrollIndicator = false
+        textView.autocapitalizationType = .none
+        textView.autocorrectionType = .no
+        textView.smartDashesType = .no
+        textView.smartQuotesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.returnKeyType = .default
+        textView.text = text
+        context.coordinator.applyFocusState(to: textView)
+        context.coordinator.scrollToVisibleRange(in: textView, anchoredToBottom: !isFocused)
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.textColor = palette.text
+        uiView.tintColor = palette.accent
+        uiView.font = TerminalFontRegistry.terminalFont(size: 16, bold: false)
+
+        if uiView.text != text {
+            uiView.text = text
+        }
+
+        context.coordinator.applyFocusState(to: uiView)
+        context.coordinator.scrollToVisibleRange(in: uiView, anchoredToBottom: !isFocused)
+
+        if uiView.bounds.width > 0 {
+            let contentHeight = measuredContentHeight(for: uiView, width: uiView.bounds.width)
+            updateScrollingState(for: uiView, contentHeight: contentHeight)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let proposedWidth = proposal.width ?? uiView.bounds.width
+        guard proposedWidth > 0 else {
+            return CGSize(width: proposal.width ?? 0, height: minHeight)
+        }
+
+        let contentHeight = measuredContentHeight(for: uiView, width: proposedWidth)
+        let clampedHeight = min(max(contentHeight, minHeight), maxHeight)
+        updateScrollingState(for: uiView, contentHeight: contentHeight)
+
+        return CGSize(width: proposedWidth, height: clampedHeight)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        @Binding private var text: String
+        @Binding private var isFocused: Bool
+
+        init(text: Binding<String>, isFocused: Binding<Bool>) {
+            _text = text
+            _isFocused = isFocused
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            let updatedText = textView.text ?? ""
+            guard text != updatedText else { return }
+            text = updatedText
+            scrollToVisibleRange(in: textView, anchoredToBottom: false)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard isFocused else { return }
+            scrollToVisibleRange(in: textView, anchoredToBottom: false)
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            guard !isFocused else { return }
+            isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            guard isFocused else { return }
+            isFocused = false
+        }
+
+        func applyFocusState(to textView: UITextView) {
+            if isFocused {
+                guard !textView.isFirstResponder else { return }
+                DispatchQueue.main.async {
+                    _ = textView.becomeFirstResponder()
+                }
+            } else if textView.isFirstResponder {
+                DispatchQueue.main.async {
+                    _ = textView.resignFirstResponder()
+                }
+            }
+        }
+
+        func scrollToVisibleRange(in textView: UITextView, anchoredToBottom: Bool) {
+            DispatchQueue.main.async {
+                let range: NSRange
+                if anchoredToBottom {
+                    let length = (textView.text as NSString).length
+                    range = NSRange(location: length, length: 0)
+                } else {
+                    range = textView.selectedRange
+                }
+                textView.scrollRangeToVisible(range)
+            }
+        }
+    }
+
+    private func measuredContentHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
+        let previousScrollEnabled = textView.isScrollEnabled
+        if previousScrollEnabled {
+            textView.isScrollEnabled = false
+        }
+
+        let fittingSize = textView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+
+        if previousScrollEnabled {
+            textView.isScrollEnabled = true
+        }
+
+        return max(minHeight, ceil(fittingSize.height))
+    }
+
+    private func updateScrollingState(for textView: UITextView, contentHeight: CGFloat) {
+        let shouldScroll = contentHeight > maxHeight
+        guard textView.isScrollEnabled != shouldScroll ||
+                textView.alwaysBounceVertical != shouldScroll ||
+                textView.showsVerticalScrollIndicator != shouldScroll else {
+            return
+        }
+
+        textView.isScrollEnabled = shouldScroll
+        textView.alwaysBounceVertical = shouldScroll
+        textView.showsVerticalScrollIndicator = shouldScroll
     }
 }
 

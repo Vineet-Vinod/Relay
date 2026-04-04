@@ -77,6 +77,15 @@ final class VoiceSessionViewModel {
         hasDraftUserSpeech && !isMuted && activeTurnTask == nil && !isEnding
     }
 
+    var shouldShowPromptComposer: Bool {
+        isPrepared &&
+        activeTurnTask == nil &&
+        !playback.isSpeakingOrQueued &&
+        !isEnding &&
+        !isFailedStatus &&
+        status != .ended
+    }
+
     private let bridgeClient: CodexBridgeClient
     private let recognizer: SpeechRecognizerService
     private let playback: SpeechPlaybackService
@@ -137,18 +146,8 @@ final class VoiceSessionViewModel {
             guard let self, !self.isEnding else { return }
             self.status = .speaking
         }
-        self.playback.onDidStartUtterance = { [weak self] kind, text in
-            guard let self else { return }
-            if kind == .assistant {
-                self.revealAssistantSpeech(text)
-            }
-        }
-        self.playback.onDidSkipUtterance = { [weak self] kind, text in
-            guard let self else { return }
-            if kind == .assistant {
-                self.revealAssistantSpeech(text)
-            }
-        }
+        self.playback.onDidStartUtterance = { _, _ in }
+        self.playback.onDidSkipUtterance = { _, _ in }
         self.playback.onDidFinishQueue = { [weak self] in
             guard let self else { return }
             if self.isEnding {
@@ -557,6 +556,7 @@ final class VoiceSessionViewModel {
             break
         case .assistantDelta(let text):
             latestErrorMessage = nil
+            appendAssistantTranscript(text)
             bufferAssistantDelta(text)
             queueSpeechIfNeeded(force: false)
             if playback.isSpeakingOrQueued {
@@ -575,6 +575,7 @@ final class VoiceSessionViewModel {
                 status = .processing
             }
         case .toolStatus(let text):
+            appendTranscript(kind: .toolStatus, text: text)
             if RelayPreferences.shared.voiceSpeaksToolStatus {
                 playback.speak(
                     text,
@@ -602,7 +603,7 @@ final class VoiceSessionViewModel {
         assistantSpeechBuffer += separator + trimmed
     }
 
-    private func revealAssistantSpeech(_ text: String) {
+    private func appendAssistantTranscript(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -618,6 +619,11 @@ final class VoiceSessionViewModel {
     private func appendTranscript(kind: VoiceTranscriptItem.Kind, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        if let lastItem = transcript.last,
+           lastItem.kind == kind,
+           lastItem.text == trimmed {
+            return
+        }
         transcript.append(VoiceTranscriptItem(kind: kind, text: trimmed))
     }
 
