@@ -125,13 +125,13 @@ struct SettingsView: View {
 
             Section {
                 Stepper(
-                    value: voiceSpeechRateBinding,
-                    in: RelayVoicePreference.minimumSpeechRate...RelayVoicePreference.maximumSpeechRate,
-                    step: RelayVoicePreference.speechRateStep
+                    value: voiceSpeechSpeedBinding,
+                    in: RelayVoicePreference.minimumDisplaySpeed...RelayVoicePreference.maximumDisplaySpeed,
+                    step: RelayVoicePreference.displaySpeedStep
                 ) {
                     settingsValueRow(
-                        title: "Speech Rate",
-                        value: voiceSpeechRateLabel,
+                        title: "Voice Speed",
+                        value: voiceSpeechSpeedLabel,
                         detail: nil
                     )
                 }
@@ -348,15 +348,15 @@ struct SettingsView: View {
         return "\(clampedSize.formatted(.number.precision(.fractionLength(1)))) pt"
     }
 
-    private var voiceSpeechRateBinding: Binding<Double> {
+    private var voiceSpeechSpeedBinding: Binding<Double> {
         Binding(
-            get: { RelayVoicePreference.clampSpeechRate(voiceSpeechRate) },
-            set: { voiceSpeechRate = RelayVoicePreference.clampSpeechRate($0) }
+            get: { RelayVoicePreference.displaySpeed(forSpeechRate: voiceSpeechRate) },
+            set: { voiceSpeechRate = RelayVoicePreference.speechRate(forDisplaySpeed: $0) }
         )
     }
 
-    private var voiceSpeechRateLabel: String {
-        RelayVoicePreference.speechRateLabel(for: voiceSpeechRateBinding.wrappedValue)
+    private var voiceSpeechSpeedLabel: String {
+        RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate)
     }
 
     private func overviewMetric(title: String, value: String) -> some View {

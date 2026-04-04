@@ -105,14 +105,14 @@ struct VoiceSessionView: View {
                                         .fill(palette.raisedColor.opacity(0.9))
                                 )
 
-                            Text(RelayVoicePreference.speechRateLabel(for: voiceSpeechRate))
+                            Text(RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(palette.mutedColor)
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Voice settings")
-                    .accessibilityValue("Speech rate \(RelayVoicePreference.speechRateLabel(for: voiceSpeechRate))")
+                    .accessibilityValue("Speech rate \(RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate))")
 
                     Button {
                         dismiss()
@@ -145,30 +145,45 @@ struct VoiceSessionView: View {
     }
 
     private func statusBadge(palette: RelayTerminalPalette) -> some View {
-        let tint: Color = switch viewModel.status {
-        case .listening:
-            palette.successColor
-        case .processing, .speaking:
-            palette.accentColor
-        case .muted:
-            palette.warningColor
-        case .failed:
-            palette.dangerColor
-        case .ended:
-            palette.mutedColor
-        case .preparing, .ready:
-            palette.textColor
-        }
+        HStack(spacing: 6) {
+            Image(systemName: statusSymbolName)
+                .font(.caption2.weight(.semibold))
 
-        return Text(viewModel.status.title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
+            Text(viewModel.status.title)
+                .font(.caption2.weight(.semibold))
+        }
+            .foregroundStyle(palette.mutedColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(tint.opacity(0.12))
+                    .fill(palette.surfaceColor.opacity(0.96))
             )
+            .overlay(
+                Capsule()
+                    .stroke(palette.subtleColor.opacity(0.7), lineWidth: 1)
+            )
+    }
+
+    private var statusSymbolName: String {
+        switch viewModel.status {
+        case .preparing:
+            return "clock.fill"
+        case .ready:
+            return "checkmark.circle.fill"
+        case .listening:
+            return "mic.fill"
+        case .processing:
+            return "ellipsis.circle.fill"
+        case .speaking:
+            return "speaker.wave.2.fill"
+        case .muted:
+            return "mic.slash.fill"
+        case .failed:
+            return "exclamationmark.circle.fill"
+        case .ended:
+            return "phone.down.fill"
+        }
     }
 
     private func transcriptPanel(palette: RelayTerminalPalette) -> some View {
@@ -263,6 +278,19 @@ struct VoiceSessionView: View {
             .buttonStyle(.plain)
 
             Button {
+                viewModel.fastForwardPlayback()
+            } label: {
+                VoiceControlLabel(
+                    title: "Skip",
+                    systemImage: "forward.end.fill",
+                    tint: viewModel.canFastForward ? palette.accentColor : palette.mutedColor
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canFastForward)
+            .accessibilityLabel("Fast forward speech")
+
+            Button {
                 viewModel.interrupt()
             } label: {
                 VoiceControlLabel(
@@ -335,15 +363,15 @@ private struct VoiceSessionSettingsSheet: View {
 
                         Spacer(minLength: RelayTheme.Spacing.content)
 
-                        Text(RelayVoicePreference.speechRateLabel(for: voiceSpeechRate))
+                        Text(RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate))
                             .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
                             .foregroundStyle(palette.accentColor)
                     }
 
                     Slider(
-                        value: speechRateBinding,
-                        in: RelayVoicePreference.minimumSpeechRate...RelayVoicePreference.maximumSpeechRate,
-                        step: RelayVoicePreference.speechRateStep
+                        value: speechSpeedBinding,
+                        in: RelayVoicePreference.minimumDisplaySpeed...RelayVoicePreference.maximumDisplaySpeed,
+                        step: RelayVoicePreference.displaySpeedStep
                     ) {
                         Text("Speech Speed")
                     } minimumValueLabel: {
@@ -372,10 +400,10 @@ private struct VoiceSessionSettingsSheet: View {
         }
     }
 
-    private var speechRateBinding: Binding<Double> {
+    private var speechSpeedBinding: Binding<Double> {
         Binding(
-            get: { RelayVoicePreference.clampSpeechRate(voiceSpeechRate) },
-            set: { voiceSpeechRate = RelayVoicePreference.clampSpeechRate($0) }
+            get: { RelayVoicePreference.displaySpeed(forSpeechRate: voiceSpeechRate) },
+            set: { voiceSpeechRate = RelayVoicePreference.speechRate(forDisplaySpeed: $0) }
         )
     }
 }
@@ -517,19 +545,39 @@ private struct VoiceTranscriptRow: View {
 
     var body: some View {
         VStack(alignment: alignment, spacing: RelayTheme.Spacing.tight) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(labelColor)
+            HStack(spacing: 6) {
+                Image(systemName: labelSymbolName)
+                    .font(.caption2.weight(.semibold))
+
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(palette.mutedColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(palette.surfaceColor.opacity(0.96))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(palette.subtleColor.opacity(0.7), lineWidth: 1)
+            )
 
             Text(item.text)
                 .font(font)
                 .foregroundStyle(textColor)
                 .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
         }
-        .padding(14)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(
             RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
                 .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
+                .stroke(palette.subtleColor.opacity(0.65), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
         .padding(.leading, alignment == .trailing ? 44 : 0)
@@ -553,6 +601,19 @@ private struct VoiceTranscriptRow: View {
         item.kind == .user ? .trailing : .leading
     }
 
+    private var labelSymbolName: String {
+        switch item.kind {
+        case .user:
+            return "person.fill"
+        case .assistant:
+            return "chevron.left.forwardslash.chevron.right"
+        case .toolStatus:
+            return "gearshape.fill"
+        case .system:
+            return "info.circle.fill"
+        }
+    }
+
     private var font: Font {
         switch item.kind {
         case .assistant, .toolStatus, .system:
@@ -563,42 +624,11 @@ private struct VoiceTranscriptRow: View {
     }
 
     private var backgroundColor: Color {
-        switch item.kind {
-        case .user:
-            return palette.accentColor.opacity(0.14)
-        case .assistant:
-            return palette.raisedColor
-        case .toolStatus:
-            return palette.warningColor.opacity(0.12)
-        case .system:
-            return palette.dangerColor.opacity(0.10)
-        }
+        palette.raisedColor
     }
 
     private var textColor: Color {
-        switch item.kind {
-        case .user:
-            return palette.textColor
-        case .assistant:
-            return palette.textColor
-        case .toolStatus:
-            return palette.textColor
-        case .system:
-            return palette.textColor
-        }
-    }
-
-    private var labelColor: Color {
-        switch item.kind {
-        case .user:
-            return palette.accentColor
-        case .assistant:
-            return palette.mutedColor
-        case .toolStatus:
-            return palette.warningColor
-        case .system:
-            return palette.dangerColor
-        }
+        palette.textColor
     }
 }
 

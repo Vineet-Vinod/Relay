@@ -47,17 +47,34 @@ enum RelayTerminalFontSizePreference {
 }
 
 enum RelayVoicePreference {
-    static let minimumSpeechRate: Double = 0.35
-    static let maximumSpeechRate: Double = 0.6
-    static let speechRateStep: Double = 0.05
-    static let defaultSpeechRate: Double = 0.5
+    static let minimumSpeechRate: Double = 0.32
+    static let maximumSpeechRate: Double = 0.76
+
+    static let minimumDisplaySpeed: Double = 0.5
+    static let maximumDisplaySpeed: Double = 2.0
+    static let displaySpeedStep: Double = 0.05
+    static let defaultDisplaySpeed: Double = 1.0
+    static let defaultSpeechRate: Double = speechRate(forDisplaySpeed: defaultDisplaySpeed)
 
     static func clampSpeechRate(_ value: Double) -> Double {
         min(max(value, minimumSpeechRate), maximumSpeechRate)
     }
 
-    static func speechRateLabel(for value: Double) -> String {
-        clampSpeechRate(value).formatted(.number.precision(.fractionLength(2)))
+    static func speechRate(forDisplaySpeed value: Double) -> Double {
+        let clampedValue = min(max(value, minimumDisplaySpeed), maximumDisplaySpeed)
+        let progress = (clampedValue - minimumDisplaySpeed) / (maximumDisplaySpeed - minimumDisplaySpeed)
+        return minimumSpeechRate + progress * (maximumSpeechRate - minimumSpeechRate)
+    }
+
+    static func displaySpeed(forSpeechRate value: Double) -> Double {
+        let clampedValue = clampSpeechRate(value)
+        let progress = (clampedValue - minimumSpeechRate) / (maximumSpeechRate - minimumSpeechRate)
+        return minimumDisplaySpeed + progress * (maximumDisplaySpeed - minimumDisplaySpeed)
+    }
+
+    static func displaySpeedLabel(forSpeechRate value: Double) -> String {
+        let displaySpeed = displaySpeed(forSpeechRate: value)
+        return "\(displaySpeed.formatted(.number.precision(.fractionLength(2))))x"
     }
 }
 

@@ -13,6 +13,7 @@ import UIKit
 @Observable
 final class VoiceSessionViewModel {
     private static let automaticTurnFinishDelay: Duration = .seconds(1.1)
+    private static let unmuteListeningResumeDelay: Duration = .milliseconds(90)
 
     enum Status: Equatable {
         case preparing
@@ -63,9 +64,11 @@ final class VoiceSessionViewModel {
     private let recognizer: SpeechRecognizerService
     private let playback: SpeechPlaybackService
     private let audioSession: VoiceAudioSessionCoordinator
+    private let controlSoundPlayer: VoiceControlSoundPlayer
 
     private var activeTurnTask: Task<Void, Never>?
     private var autoFinishTask: Task<Void, Never>?
+    private var muteTransitionTask: Task<Void, Never>?
     private var assistantSpeechBuffer = ""
     private var didReceiveAssistantDone = false
     private var shouldResumeListeningAfterPlayback = false
@@ -77,6 +80,7 @@ final class VoiceSessionViewModel {
         let recognizer = SpeechRecognizerService()
         let playback = SpeechPlaybackService()
         let audioSession = VoiceAudioSessionCoordinator()
+        let controlSoundPlayer = VoiceControlSoundPlayer()
 
         self.configuration = configuration
         self.resolvedWorkspacePath = configuration.workspacePath
@@ -84,6 +88,7 @@ final class VoiceSessionViewModel {
         self.recognizer = recognizer
         self.playback = playback
         self.audioSession = audioSession
+        self.controlSoundPlayer = controlSoundPlayer
 
         self.recognizer.onPartialTranscription = { [weak self] text in
             self?.handlePartialTranscript(text)
@@ -156,6 +161,10 @@ final class VoiceSessionViewModel {
         activeTurnTask != nil || playback.isSpeakingOrQueued
     }
 
+    var canFastForward: Bool {
+        playback.canFastForward
+    }
+
     var canListen: Bool {
         isPrepared && !isMuted && activeTurnTask == nil && !playback.isSpeakingOrQueued && !isEnding
     }
@@ -203,6 +212,7 @@ final class VoiceSessionViewModel {
 
     func end() async {
         isEnding = true
+        cancelMuteTransition()
         cancelPendingAutoFinish()
         activeTurnTask?.cancel()
         activeTurnTask = nil
@@ -215,6 +225,7 @@ final class VoiceSessionViewModel {
     }
 
     func toggleMute() {
+        cancelMuteTransition()
         isMuted.toggle()
         if isMuted {
             cancelPendingAutoFinish()
@@ -222,8 +233,10 @@ final class VoiceSessionViewModel {
             draftUserSpeech = ""
             isAwaitingTurnCompletion = false
             status = .muted
+            controlSoundPlayer.play(.mute)
         } else {
-            beginListeningIfPossible()
+            status = statusAfterUnmuting()
+            scheduleListeningResumeAfterUnmuteCue()
         }
     }
 
@@ -251,6 +264,15 @@ final class VoiceSessionViewModel {
         }
     }
 
+    func fastForwardPlayback() {
+        guard playback.canFastForward else { return }
+        playback.fastForward()
+
+        if playback.isSpeakingOrQueued {
+            status = .speaking
+        }
+    }
+
     func finishCurrentTurn() {
         guard canSendCurrentTurn else { return }
         isAwaitingTurnCompletion = false
@@ -273,6 +295,49 @@ final class VoiceSessionViewModel {
         isAwaitingTurnCompletion = false
         status = .listening
         recognizer.startListening()
+    }
+
+    private func scheduleListeningResumeAfterUnmuteCue() {
+        muteTransitionTask = Task { [weak self] in
+            guard let self else { return }
+
+            await self.controlSoundPlayer.playAndWait(.unmute)
+
+            do {
+                try await Task.sleep(for: Self.unmuteListeningResumeDelay)
+            } catch {
+                return
+            }
+
+            await MainActor.run {
+                guard !self.isMuted && !self.isEnding else { return }
+                guard !self.playback.isSpeakingOrQueued else { return }
+                guard self.activeTurnTask == nil else { return }
+                self.beginListeningIfPossible()
+            }
+        }
+    }
+
+    private func cancelMuteTransition() {
+        muteTransitionTask?.cancel()
+        muteTransitionTask = nil
+        controlSoundPlayer.stop()
+    }
+
+    private func statusAfterUnmuting() -> Status {
+        if playback.isSpeakingOrQueued {
+            return .speaking
+        }
+
+        if activeTurnTask != nil {
+            return .processing
+        }
+
+        if isPrepared {
+            return .ready
+        }
+
+        return .preparing
     }
 
     private func handlePartialTranscript(_ text: String) {
