@@ -75,6 +75,7 @@ enum SSHClientError: LocalizedError {
     case unsupportedHostKey
     case untrustedHostKey(SSHHostTrustChallenge)
     case hostKeyMismatch(expected: String, actual: String)
+    case connectionTimedOut(seconds: Int)
     case keyProvisioningFailed(String)
     case publicKeyVerificationFailed
     case keychainFailure(status: OSStatus)
@@ -105,6 +106,8 @@ enum SSHClientError: LocalizedError {
             "Verify the SSH host fingerprint before connecting: \(hostKey.fingerprint)"
         case .hostKeyMismatch(let expected, let actual):
             "SSH host identity changed. Expected \(expected), received \(actual)."
+        case .connectionTimedOut(let seconds):
+            "Relay could not complete the SSH connection within \(seconds) seconds."
         case .keyProvisioningFailed(let message):
             message
         case .publicKeyVerificationFailed:

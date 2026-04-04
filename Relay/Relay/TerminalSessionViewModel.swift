@@ -21,12 +21,14 @@ final class TerminalSessionViewModel {
     var isShowingHostTrustPrompt = false
     var isProvisioningSavedKey = false
     var canReconnectWithPassword = false
+    var didDisconnectUnexpectedly = false
     var pendingHostTrust: SSHHostTrustChallenge?
 
     var onTerminalOutput: (@MainActor ([UInt8]) -> Void)?
 
     private let client: SSHClient
     private let credentials: SSHCredentialStore
+    private var isDisconnectingManually = false
 
     init(host: Host, client: SSHClient? = nil, credentials: SSHCredentialStore = RelayServices.sshCredentials) {
         self.host = host
@@ -43,6 +45,8 @@ final class TerminalSessionViewModel {
         isConnecting = true
         latestErrorMessage = nil
         canReconnectWithPassword = false
+        didDisconnectUnexpectedly = false
+        isDisconnectingManually = false
         appendMessage("Connecting to \(host.username)@\(host.hostname):\(host.port)...", kind: .status)
 
         do {
@@ -58,7 +62,7 @@ final class TerminalSessionViewModel {
             let description = describe(error)
             latestErrorMessage = description
             appendMessage(description, kind: .error)
-            if !host.usesPasswordAuthentication {
+            if !host.usesPasswordAuthentication && RelayPreferences.shared.allowsPasswordFallback {
                 canReconnectWithPassword = true
             }
         }
@@ -109,6 +113,7 @@ final class TerminalSessionViewModel {
         latestErrorMessage = nil
         isShowingHostTrustPrompt = false
         self.pendingHostTrust = nil
+        didDisconnectUnexpectedly = false
         appendMessage("Trusted SSH host fingerprint \(pendingHostTrust.fingerprint).", kind: .status)
         await connect()
     }
@@ -128,6 +133,7 @@ final class TerminalSessionViewModel {
         pendingHostTrust = nil
         isShowingHostTrustPrompt = false
         latestErrorMessage = nil
+        didDisconnectUnexpectedly = false
         await connect()
     }
 
@@ -151,9 +157,12 @@ final class TerminalSessionViewModel {
     func disconnect() async {
         guard isConnected || isConnecting else { return }
 
+        didDisconnectUnexpectedly = false
+        isDisconnectingManually = true
         await client.disconnect()
         isConnected = false
         isConnecting = false
+        isDisconnectingManually = false
     }
 
     func dismissLatestError() {
@@ -175,8 +184,10 @@ final class TerminalSessionViewModel {
             latestErrorMessage = text
             appendMessage(text, kind: .error)
         case .disconnected:
+            didDisconnectUnexpectedly = !isDisconnectingManually && (isConnected || isConnecting)
             isConnected = false
             isConnecting = false
+            isDisconnectingManually = false
             appendMessage("Disconnected.", kind: .status)
         }
     }
@@ -194,7 +205,7 @@ final class TerminalSessionViewModel {
             pendingHostTrust = hostKey
             isShowingHostTrustPrompt = true
         default:
-            if !host.usesPasswordAuthentication {
+            if !host.usesPasswordAuthentication && RelayPreferences.shared.allowsPasswordFallback {
                 canReconnectWithPassword = true
             }
         }

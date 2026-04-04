@@ -16,7 +16,7 @@ protocol MeshProvider {
     func currentSnapshot() async -> MeshProviderSnapshot
     func fetchPeers() async throws -> [PeerDevice]
     func endpoint(for peer: PeerDevice) async throws -> Host
-    func saveHost(_ host: SavedTailnetHost) async throws
+    func saveHost(_ host: SavedDevice) async throws
     func deletePeer(_ peer: PeerDevice) async throws
 }
 
@@ -73,7 +73,7 @@ enum MeshProviderError: LocalizedError {
     }
 }
 
-struct SavedTailnetHost: Identifiable, Hashable, Codable, Sendable {
+struct SavedDevice: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     var name: String
     var hostname: String
@@ -95,22 +95,22 @@ struct SavedTailnetHost: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
-struct TailscaleMeshProvider: MeshProvider {
-    let displayName = "Tailscale"
+struct ManualDeviceProvider: MeshProvider {
+    let displayName = "Saved Devices"
     let supportsManualHostManagement = true
 
-    private let store: TailnetHostStore
+    private let store: SavedDeviceStore
     private let reachability = HostReachabilityService.shared
 
-    init(store: TailnetHostStore = .shared) {
+    init(store: SavedDeviceStore = .shared) {
         self.store = store
     }
 
     func currentSnapshot() async -> MeshProviderSnapshot {
         MeshProviderSnapshot(
             status: .ready(
-                title: "Tailnet Hosts",
-                detail: "Relay assumes the Tailscale app is already connected. Add hosts using a Tailscale IP or MagicDNS hostname, then SSH directly over the tailnet."
+                title: "Saved Devices",
+                detail: "Add devices by IP address and Relay will check which ones are reachable over SSH."
             )
         )
     }
@@ -139,7 +139,7 @@ struct TailscaleMeshProvider: MeshProvider {
         )
     }
 
-    func saveHost(_ host: SavedTailnetHost) async throws {
+    func saveHost(_ host: SavedDevice) async throws {
         await store.save(host)
     }
 
@@ -148,26 +148,27 @@ struct TailscaleMeshProvider: MeshProvider {
     }
 }
 
-actor TailnetHostStore {
-    static let shared = TailnetHostStore()
+actor SavedDeviceStore {
+    static let shared = SavedDeviceStore()
 
     private let defaults: UserDefaults
-    private let storageKey = "relay.tailscale.saved-hosts.v1"
+    private let storageKey = "relay.saved-devices.v1"
+    private let legacyStorageKey = "relay.tailscale.saved-hosts.v1"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
-    func hosts() -> [SavedTailnetHost] {
-        guard let data = defaults.data(forKey: storageKey),
-              let hosts = try? JSONDecoder().decode([SavedTailnetHost].self, from: data) else {
+    func hosts() -> [SavedDevice] {
+        guard let data = storedData,
+              let hosts = try? JSONDecoder().decode([SavedDevice].self, from: data) else {
             return []
         }
 
         return hosts.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func save(_ host: SavedTailnetHost) {
+    func save(_ host: SavedDevice) {
         var currentHosts = hosts()
 
         if let index = currentHosts.firstIndex(where: { $0.id == host.id }) {
@@ -184,42 +185,58 @@ actor TailnetHostStore {
         persist(filtered)
     }
 
-    private func persist(_ hosts: [SavedTailnetHost]) {
+    func replaceAll(with hosts: [SavedDevice]) {
+        persist(hosts)
+    }
+
+    func eraseAll() {
+        persist([])
+    }
+
+    private func persist(_ hosts: [SavedDevice]) {
         guard let data = try? JSONEncoder().encode(hosts) else {
             return
         }
 
         defaults.set(data, forKey: storageKey)
+        defaults.removeObject(forKey: legacyStorageKey)
+    }
+
+    private var storedData: Data? {
+        if let currentData = defaults.data(forKey: storageKey) {
+            return currentData
+        }
+
+        return defaults.data(forKey: legacyStorageKey)
     }
 }
 
-private extension SavedTailnetHost {
+private extension SavedDevice {
     func peerDevice(isOnline: Bool) -> PeerDevice {
         PeerDevice(
             id: id,
             providerIdentifier: id.uuidString,
             name: name,
             networkAddress: hostname,
-            meshHostname: hostname.looksLikeIPAddress ? nil : hostname,
             port: port,
             sshUsername: username,
             isOnline: isOnline,
-            operatingSystem: "Tailnet",
-            ownerName: "Saved Host"
+            operatingSystem: "Direct SSH",
+            ownerName: "Saved Device"
         )
     }
 }
 
-private extension String {
-    var looksLikeIPAddress: Bool {
-        allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
+extension String {
+    var isIPAddress: Bool {
+        IPv4Address(self) != nil || IPv6Address(self) != nil
     }
 }
 
 actor HostReachabilityService {
     static let shared = HostReachabilityService()
 
-    func onlineStatusByHostID(for hosts: [SavedTailnetHost]) async -> [UUID: Bool] {
+    func onlineStatusByHostID(for hosts: [SavedDevice]) async -> [UUID: Bool] {
         await withTaskGroup(of: (UUID, Bool).self, returning: [UUID: Bool].self) { group in
             for host in hosts {
                 group.addTask {

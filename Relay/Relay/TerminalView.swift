@@ -12,11 +12,17 @@ import UIKit
 struct TerminalView: View {
     @Environment(\.colorScheme) private var colorScheme
 
+    @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = 14.0
+    @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
+    @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
+    @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
+
     @State var viewModel: TerminalSessionViewModel
     @State private var terminalBridge = RelayTerminalBridge()
     @State private var isShowingPasswordSheet = false
     @State private var pendingReconnectHost: Host?
     @State private var didAttemptConnection = false
+    @State private var autoReconnectTask: Task<Void, Never>?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -26,6 +32,8 @@ struct TerminalView: View {
             SSHTerminalSurface(
                 bridge: terminalBridge,
                 palette: palette,
+                fontSize: CGFloat(terminalFontSize),
+                bellBehavior: resolvedBellBehavior,
                 onSend: { data in
                     Task {
                         await viewModel.sendRawInput(Array(data))
@@ -178,16 +186,39 @@ struct TerminalView: View {
             }
 
             didAttemptConnection = true
+            updateIdleTimer()
             if !viewModel.isConnected && !viewModel.isConnecting {
                 await viewModel.connect()
             }
         }
         .onChange(of: viewModel.isConnected) { _, isConnected in
+            updateIdleTimer()
             if isConnected {
+                autoReconnectTask?.cancel()
+                autoReconnectTask = nil
                 terminalBridge.focus()
             }
         }
+        .onChange(of: viewModel.isConnecting) { _, _ in
+            updateIdleTimer()
+        }
+        .onChange(of: keepsScreenAwake) { _, _ in
+            updateIdleTimer()
+        }
+        .onChange(of: viewModel.didDisconnectUnexpectedly) { _, didDisconnectUnexpectedly in
+            guard didDisconnectUnexpectedly,
+                  automaticallyReconnect,
+                  viewModel.latestErrorMessage == nil,
+                  !viewModel.isShowingHostTrustPrompt else {
+                return
+            }
+
+            scheduleAutoReconnect()
+        }
         .onDisappear {
+            autoReconnectTask?.cancel()
+            autoReconnectTask = nil
+            UIApplication.shared.isIdleTimerDisabled = false
             Task {
                 await viewModel.disconnect()
             }
@@ -196,6 +227,10 @@ struct TerminalView: View {
 
     private var palette: RelayTerminalPalette {
         RelayTerminalPalette.palette(for: colorScheme)
+    }
+
+    private var resolvedBellBehavior: RelayBellBehavior {
+        RelayBellBehavior(rawValue: bellBehavior) ?? .haptic
     }
 
     private var recoveryTitle: String {
@@ -228,6 +263,8 @@ struct TerminalView: View {
     }
 
     private func reconnectTerminal() {
+        autoReconnectTask?.cancel()
+        autoReconnectTask = nil
         terminalBridge.reset()
         viewModel.dismissLatestError()
         Task {
@@ -243,6 +280,27 @@ struct TerminalView: View {
             await viewModel.reconnect(with: pendingReconnectHost)
         }
     }
+
+    private func scheduleAutoReconnect() {
+        guard autoReconnectTask == nil else { return }
+
+        autoReconnectTask = Task {
+            try? await Task.sleep(for: .seconds(1.25))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                terminalBridge.reset()
+                viewModel.dismissLatestError()
+            }
+            await viewModel.connect()
+            await MainActor.run {
+                autoReconnectTask = nil
+            }
+        }
+    }
+
+    private func updateIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = keepsScreenAwake && (viewModel.isConnected || viewModel.isConnecting)
+    }
 }
 
 private struct TerminalProgressOverlay: View {
@@ -255,7 +313,7 @@ private struct TerminalProgressOverlay: View {
                 .tint(palette.textColor)
 
             Text(title)
-                .font(.footnote.weight(.semibold))
+                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 12, bold: true))
                 .foregroundStyle(palette.textColor)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -277,7 +335,7 @@ private struct TerminalRecoveryOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 14, bold: true))
                 .foregroundStyle(palette.textColor)
 
             Text(message)
@@ -348,6 +406,8 @@ private final class RelayTerminalBridge {
 private struct SSHTerminalSurface: UIViewRepresentable {
     let bridge: RelayTerminalBridge
     let palette: RelayTerminalPalette
+    let fontSize: CGFloat
+    let bellBehavior: RelayBellBehavior
     let onSend: (ArraySlice<UInt8>) -> Void
     let onResize: (Int, Int) -> Void
 
@@ -356,6 +416,7 @@ private struct SSHTerminalSurface: UIViewRepresentable {
         view.relayBridge = bridge
         view.configure(onSend: onSend, onResize: onResize)
         view.applyPalette(palette)
+        view.applyPreferences(fontSize: fontSize, bellBehavior: bellBehavior)
         bridge.attach(view)
         DispatchQueue.main.async {
             _ = view.becomeFirstResponder()
@@ -367,6 +428,7 @@ private struct SSHTerminalSurface: UIViewRepresentable {
         uiView.relayBridge = bridge
         uiView.configure(onSend: onSend, onResize: onResize)
         uiView.applyPalette(palette)
+        uiView.applyPreferences(fontSize: fontSize, bellBehavior: bellBehavior)
         bridge.attach(uiView)
     }
 
@@ -380,16 +442,13 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
 
     private var onSend: ((ArraySlice<UInt8>) -> Void)?
     private var onResize: ((Int, Int) -> Void)?
+    private var configuredFontSize: CGFloat?
+    private var bellBehavior: RelayBellBehavior = .haptic
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         terminalDelegate = self
-        setFonts(
-            normal: TerminalFontRegistry.terminalFont(size: 14, bold: false),
-            bold: TerminalFontRegistry.terminalFont(size: 14, bold: true),
-            italic: TerminalFontRegistry.terminalFont(size: 14, bold: false),
-            boldItalic: TerminalFontRegistry.terminalFont(size: 14, bold: true)
-        )
+        applyPreferences(fontSize: 14, bellBehavior: .haptic)
         optionAsMetaKey = false
         applyPalette(RelayTerminalPalette.palette(for: traitCollection))
     }
@@ -415,6 +474,21 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
     ) {
         self.onSend = onSend
         self.onResize = onResize
+    }
+
+    func applyPreferences(fontSize: CGFloat, bellBehavior: RelayBellBehavior) {
+        self.bellBehavior = bellBehavior
+
+        guard configuredFontSize != fontSize else { return }
+        configuredFontSize = fontSize
+        setFonts(
+            normal: TerminalFontRegistry.terminalFont(size: fontSize, bold: false),
+            bold: TerminalFontRegistry.terminalFont(size: fontSize, bold: true),
+            italic: TerminalFontRegistry.terminalFont(size: fontSize, bold: false),
+            boldItalic: TerminalFontRegistry.terminalFont(size: fontSize, bold: true)
+        )
+        setNeedsLayout()
+        setNeedsDisplay()
     }
 
     func applyPalette(_ palette: RelayTerminalPalette) {
@@ -445,7 +519,17 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
         UIApplication.shared.open(url)
     }
 
-    func bell(source: SwiftTerm.TerminalView) {}
+    func bell(source: SwiftTerm.TerminalView) {
+        switch bellBehavior {
+        case .off:
+            return
+        case .haptic:
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.warning)
+        case .visual:
+            flashBell()
+        }
+    }
 
     func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
         if let string = String(data: content, encoding: .utf8) {
@@ -456,4 +540,23 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
     func iTermContent(source: SwiftTerm.TerminalView, content: ArraySlice<UInt8>) {}
 
     func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {}
+
+    private func flashBell() {
+        let overlay = UIView(frame: bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.18)
+        overlay.isUserInteractionEnabled = false
+        overlay.alpha = 0
+        addSubview(overlay)
+
+        UIView.animate(withDuration: 0.12, animations: {
+            overlay.alpha = 1
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.18, animations: {
+                overlay.alpha = 0
+            }, completion: { _ in
+                overlay.removeFromSuperview()
+            })
+        })
+    }
 }

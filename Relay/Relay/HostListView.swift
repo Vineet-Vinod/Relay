@@ -15,7 +15,8 @@ struct HostListView: View {
     @State private var isLoading = false
     @State private var resolvingPeerID: PeerDevice.ID?
     @State private var errorMessage: String?
-    @State private var isShowingAddHostSheet = false
+    @State private var detailPeer: PeerDevice?
+    @State private var deviceEditor: DeviceEditorContext?
     @State private var loginHost: Host?
     @State private var pendingDestinationHost: Host?
     @State private var destinationHost: Host?
@@ -23,41 +24,15 @@ struct HostListView: View {
     var body: some View {
         List {
             Section {
-                statusCard
+                devicesContent
             }
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-            .listRowBackground(Color.clear)
 
-            if let errorMessage {
+            if let errorMessage, !peers.isEmpty {
                 Section {
                     errorCard(message: errorMessage)
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 .listRowBackground(Color.clear)
-            }
-
-            if snapshot.status.isReadyForPeers {
-                Section {
-                    if isLoading {
-                        loadingDevicesRow
-                    } else if peers.isEmpty {
-                        emptyDevicesState
-                    } else {
-                        ForEach(peers) { peer in
-                            Button {
-                                Task {
-                                    await resolveEndpoint(for: peer)
-                                }
-                            } label: {
-                                peerRow(for: peer)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!peer.isOnline || resolvingPeerID != nil)
-                        }
-                    }
-                } header: {
-                    devicesHeader
-                }
             }
         }
         .listStyle(.insetGrouped)
@@ -77,9 +52,11 @@ struct HostListView: View {
                     pendingDestinationHost = authenticatedHost
                 }
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $isShowingAddHostSheet) {
-            AddTailnetHostSheet { host in
+        .sheet(item: $deviceEditor) { context in
+            AddDeviceSheet(device: context.device) { host in
                 Task {
                     await saveHost(host)
                 }
@@ -90,145 +67,61 @@ struct HostListView: View {
         .navigationDestination(item: $destinationHost) { host in
             TerminalView(viewModel: TerminalSessionViewModel(host: host))
         }
+        .navigationDestination(item: $detailPeer) { peer in
+            DeviceDetailView(
+                peer: peer,
+                isConnecting: resolvingPeerID == peer.id,
+                onEdit: {
+                    deviceEditor = DeviceEditorContext(device: peer.savedDeviceDraft)
+                },
+                onConnect: {
+                    Task {
+                        await resolveEndpoint(for: peer)
+                    }
+                }
+            )
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    Task {
-                        await refresh()
-                    }
+                    presentAddDeviceSheet()
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "plus")
                 }
-                .disabled(isLoading || resolvingPeerID != nil)
-                .accessibilityLabel("Refresh devices")
+                .disabled(isLoading)
+                .accessibilityLabel("Add device")
             }
         }
-    }
-
-    private var statusCard: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
-            HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(statusTint.opacity(0.14))
-                        .frame(width: 46, height: 46)
-
-                    Image(systemName: statusIconName)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(statusTint)
-                }
-
-                VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
-                    Text(provider.displayName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Text(snapshot.status.title)
-                        .font(.title3.weight(.semibold))
-
-                    Text(snapshot.status.detail)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-
-            if snapshot.status.isReadyForPeers {
-                HStack(spacing: RelayTheme.Spacing.tight) {
-                    statusChip(
-                        title: "\(onlinePeerCount) available",
-                        systemImage: "desktopcomputer",
-                        tint: onlinePeerCount == 0 ? .secondary : RelayTheme.success
-                    )
-
-                    if provider.supportsManualHostManagement {
-                        statusChip(
-                            title: "Passwords requested as needed",
-                            systemImage: "key.horizontal"
-                        )
-                    }
-                }
-            }
-
-            if provider.supportsManualHostManagement {
-                providerActionRow
-            }
-        }
-        .relayAppCard(padding: 18)
     }
 
     @ViewBuilder
-    private var providerActionRow: some View {
-        Button {
-            isShowingAddHostSheet = true
-        } label: {
-            Label("Add Tailnet Host", systemImage: "plus")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(RelayTheme.accent)
-        .disabled(isLoading)
-    }
-
-    private var statusIconName: String {
+    private var devicesContent: some View {
         switch snapshot.status {
         case .checking:
-            "dot.radiowaves.left.and.right"
-        case .unavailable:
-            "exclamationmark.triangle.fill"
+            loadingDevicesRow
+        case .unavailable(let message):
+            unavailableDevicesState(message: message)
         case .ready:
-            "checkmark.circle.fill"
-        }
-    }
-
-    private var statusTint: Color {
-        switch snapshot.status {
-        case .checking:
-            .secondary
-        case .unavailable:
-            RelayTheme.warning
-        case .ready:
-            RelayTheme.success
-        }
-    }
-
-    private var emptyStateMessage: String {
-        "No tailnet hosts are saved yet. Add a host using its Tailscale IP or MagicDNS hostname, then connect over your active tailnet."
-    }
-
-    private var onlinePeerCount: Int {
-        peers.reduce(into: 0) { count, peer in
-            if peer.isOnline {
-                count += 1
+            if isLoading && peers.isEmpty {
+                loadingDevicesRow
+            } else if let errorMessage, peers.isEmpty {
+                failedDevicesState(message: errorMessage)
+            } else if peers.isEmpty {
+                emptyDevicesState
+            } else {
+                ForEach(peers) { peer in
+                    peerRow(for: peer)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                }
             }
         }
-    }
-
-    private var devicesHeader: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
-            Text("Devices")
-                .font(.headline)
-                .textCase(nil)
-
-            Text("Saved hosts are sorted by availability, then name.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .textCase(nil)
-        }
-        .padding(.top, 8)
     }
 
     private var loadingDevicesRow: some View {
         HStack(spacing: RelayTheme.Spacing.compact) {
             ProgressView()
-            Text("Loading devices")
+            Text("Checking devices")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -236,13 +129,26 @@ struct HostListView: View {
     }
 
     private var emptyDevicesState: some View {
-        ContentUnavailableView(
-            "No Devices Found",
-            systemImage: "desktopcomputer",
-            description: Text(emptyStateMessage)
-        )
+        VStack(spacing: RelayTheme.Spacing.content) {
+            Image(systemName: "desktopcomputer")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: RelayTheme.Spacing.tight) {
+                Text("No Devices")
+                    .font(.headline)
+
+                Button {
+                    presentAddDeviceSheet()
+                } label: {
+                    Label("Add Device", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(RelayTheme.accent)
+            }
+        }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .padding(.vertical, 20)
     }
 
     private func errorCard(message: String) -> some View {
@@ -273,66 +179,117 @@ struct HostListView: View {
         .relayAppCard()
     }
 
-    private func statusChip(title: String, systemImage: String, tint: Color = .secondary) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                Capsule()
-                    .fill(tint.opacity(0.10))
-            )
+    private func unavailableDevicesState(message: String) -> some View {
+        ContentUnavailableView(
+            "Devices Unavailable",
+            systemImage: "exclamationmark.triangle",
+            description: Text(message)
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private func failedDevicesState(message: String) -> some View {
+        VStack(spacing: RelayTheme.Spacing.content) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(RelayTheme.warning)
+
+            VStack(spacing: RelayTheme.Spacing.tight) {
+                Text("Relay Couldn't Load Devices")
+                    .font(.headline)
+
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button("Try Again") {
+                Task {
+                    await refresh()
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 
     private func peerRow(for peer: PeerDevice) -> some View {
-        HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill((peer.isOnline ? RelayTheme.success : Color.secondary).opacity(0.12))
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Image(systemName: peer.isOnline ? "desktopcomputer.and.arrow.down" : "desktopcomputer")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(peer.isOnline ? RelayTheme.success : .secondary)
+        HStack(spacing: RelayTheme.Spacing.compact) {
+            Button {
+                Task {
+                    await resolveEndpoint(for: peer)
                 }
+            } label: {
+                HStack(alignment: .center, spacing: RelayTheme.Spacing.compact) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill((peer.isOnline ? RelayTheme.success : Color.secondary).opacity(0.12))
+                        .frame(width: 42, height: 42)
+                        .overlay {
+                            Image(systemName: peer.isOnline ? "desktopcomputer.and.arrow.down" : "desktopcomputer")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(peer.isOnline ? RelayTheme.success : .secondary)
+                        }
 
-            VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
-                Text(peer.name)
-                    .font(.headline)
+                    VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
+                        Text(peer.name)
+                            .font(.headline)
 
-                Text("\(peer.sshUsername)@\(peer.displayAddress)")
-                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                        Text(peer.networkAddress)
+                            .font(TerminalFontRegistry.terminalSwiftUIFont(size: 14))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text("\(peer.operatingSystem) • \(peer.ownerName)")
-                    .font(.caption)
+                    if resolvingPeerID == peer.id {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        statusBadge(isOnline: peer.isOnline)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(!peer.isOnline || resolvingPeerID != nil)
+
+            Button {
+                detailPeer = peer
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle()
+                            .fill(Color(uiColor: .systemBackground))
+                    )
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: RelayTheme.Spacing.tight) {
-                if resolvingPeerID == peer.id {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Text(peer.isOnline ? "Online" : "Offline")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(peer.isOnline ? RelayTheme.success : .secondary)
-                }
-
-                if peer.isOnline && resolvingPeerID != peer.id {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show device details")
         }
-        .padding(.vertical, 6)
-        .opacity(peer.isOnline ? 1 : 0.62)
-        .swipeActions(edge: .trailing, allowsFullSwipe: provider.supportsManualHostManagement) {
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: RelayTheme.Radius.card, style: .continuous)
+                .fill(RelayTheme.surfaceRaised)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: RelayTheme.Radius.card, style: .continuous)
+                .stroke(RelayTheme.surfaceStroke, lineWidth: 1)
+        )
+        .opacity(peer.isOnline ? 1 : 0.78)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if provider.supportsManualHostManagement {
+                Button {
+                    deviceEditor = DeviceEditorContext(device: peer.savedDeviceDraft)
+                } label: {
+                    Label("Edit", systemImage: "slider.horizontal.3")
+                }
+                .tint(RelayTheme.accent)
+
                 Button(role: .destructive) {
                     Task {
                         await deletePeer(peer)
@@ -342,6 +299,18 @@ struct HostListView: View {
                 }
             }
         }
+    }
+
+    private func statusBadge(isOnline: Bool) -> some View {
+        Text(isOnline ? "Online" : "Offline")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(isOnline ? RelayTheme.success : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill((isOnline ? RelayTheme.success : Color.secondary).opacity(0.10))
+            )
     }
 
     private func refresh() async {
@@ -372,12 +341,12 @@ struct HostListView: View {
         isLoading = false
     }
 
-    private func saveHost(_ host: SavedTailnetHost) async {
+    private func saveHost(_ host: SavedDevice) async {
         errorMessage = nil
 
         do {
             try await provider.saveHost(host)
-            isShowingAddHostSheet = false
+            deviceEditor = nil
             await refresh()
         } catch {
             errorMessage = error.localizedDescription
@@ -407,7 +376,8 @@ struct HostListView: View {
 
         do {
             let host = try await provider.endpoint(for: peer)
-            if RelayServices.sshCredentials.hasStoredKey(for: host.remoteIdentity) {
+            if RelayPreferences.shared.usesSavedKeysAutomatically,
+               RelayServices.sshCredentials.hasStoredKey(for: host.remoteIdentity) {
                 destinationHost = host
             } else {
                 loginHost = host
@@ -422,17 +392,138 @@ struct HostListView: View {
         self.pendingDestinationHost = nil
         destinationHost = pendingDestinationHost
     }
+
+    private func presentAddDeviceSheet() {
+        deviceEditor = DeviceEditorContext(device: nil)
+    }
 }
 
-private struct AddTailnetHostSheet: View {
-    let onSave: (SavedTailnetHost) -> Void
+private struct DeviceEditorContext: Identifiable {
+    let id: UUID
+    let device: SavedDevice?
+
+    init(device: SavedDevice?) {
+        self.id = device?.id ?? UUID()
+        self.device = device
+    }
+}
+
+private struct DeviceDetailView: View {
+    let peer: PeerDevice
+    let isConnecting: Bool
+    let onEdit: () -> Void
+    let onConnect: () -> Void
+
+    var body: some View {
+        List {
+            Section {
+                statusRow
+            }
+
+            Section("Connection") {
+                detailRow(title: "Address", value: peer.networkAddress, monospaced: true)
+                detailRow(title: "User", value: peer.sshUsername, monospaced: true)
+                detailRow(title: "Port", value: "\(peer.port)", monospaced: true)
+            }
+
+            if peer.operatingSystem != "Direct SSH" || peer.ownerName != "Saved Device" {
+                Section("Details") {
+                    detailRow(title: "Type", value: peer.operatingSystem)
+                    detailRow(title: "Owner", value: peer.ownerName)
+                }
+            }
+
+            Section {
+                Button {
+                    onConnect()
+                } label: {
+                    HStack {
+                        if isConnecting {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+
+                        Text(peer.isOnline ? "Connect" : "Offline")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(RelayTheme.accent)
+                .disabled(!peer.isOnline || isConnecting)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(RelayTheme.surfaceBase)
+        .navigationTitle(peer.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Edit") {
+                    onEdit()
+                }
+            }
+        }
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: RelayTheme.Spacing.compact) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill((peer.isOnline ? RelayTheme.success : Color.secondary).opacity(0.12))
+                .frame(width: 48, height: 48)
+                .overlay {
+                    Image(systemName: peer.isOnline ? "desktopcomputer.and.arrow.down" : "desktopcomputer")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(peer.isOnline ? RelayTheme.success : .secondary)
+                }
+
+            VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
+                Text(peer.isOnline ? "Online" : "Offline")
+                    .font(.headline)
+
+                Text(peer.networkAddress)
+                    .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func detailRow(title: String, value: String, monospaced: Bool = false) -> some View {
+        HStack(spacing: RelayTheme.Spacing.compact) {
+            Text(title)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(monospaced ? TerminalFontRegistry.terminalSwiftUIFont(size: 14) : .body)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct AddDeviceSheet: View {
+    let device: SavedDevice?
+    let onSave: (SavedDevice) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
-    @State private var hostname = ""
+    @State private var address = ""
     @State private var username = ""
     @State private var port = "22"
-    @FocusState private var focusedField: TailnetHostField?
+    @FocusState private var focusedField: AddDeviceField?
+
+    init(device: SavedDevice? = nil, onSave: @escaping (SavedDevice) -> Void) {
+        self.device = device
+        self.onSave = onSave
+        _name = State(initialValue: device?.name ?? "")
+        _address = State(initialValue: device?.hostname ?? "")
+        _username = State(initialValue: device?.username ?? "")
+        _port = State(initialValue: String(device?.port ?? 22))
+    }
 
     var body: some View {
         NavigationStack {
@@ -446,11 +537,11 @@ private struct AddTailnetHostSheet: View {
                 .padding(.bottom, 120)
             }
             .background(RelayTheme.surfaceBase.ignoresSafeArea())
-            .navigationTitle("Tailnet Host")
+            .navigationTitle(device == nil ? "Add Device" : "Edit Device")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    focusedField = .name
+                    focusedField = device == nil ? .address : .username
                 }
             }
             .toolbar {
@@ -468,10 +559,12 @@ private struct AddTailnetHostSheet: View {
 
     private var introCard: some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
-            Label("Add Tailnet Host", systemImage: "point.3.connected.trianglepath.dotted")
+            Label(device == nil ? "Connect By IP Address" : "Update Device Details", systemImage: "point.3.connected.trianglepath.dotted")
                 .font(.title3.weight(.semibold))
 
-            Text("Add a machine that is reachable through the Tailscale app already running on this device. Use either a Tailscale IP or a MagicDNS hostname.")
+            Text(device == nil
+                 ? "Save a device with its IP address so Relay can check whether SSH is reachable and reconnect later."
+                 : "Change the label, address, username, or port Relay should use the next time you connect.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -485,11 +578,7 @@ private struct AddTailnetHostSheet: View {
                 .font(.headline)
 
             VStack(spacing: 14) {
-                hostField(title: "Name", prompt: "Mac mini", text: $name, field: .name, submitLabel: .next) {
-                    focusedField = .hostname
-                }
-
-                hostField(title: "Host", prompt: "100.101.102.103 or server.tailnet.ts.net", text: $hostname, field: .hostname, submitLabel: .next, isTechnical: true) {
+                hostField(title: "IP Address", prompt: "192.168.1.24", text: $address, field: .address, submitLabel: .next, isTechnical: true) {
                     focusedField = .username
                 }
 
@@ -497,10 +586,13 @@ private struct AddTailnetHostSheet: View {
                     focusedField = .port
                 }
 
-                hostField(title: "Port", prompt: "22", text: $port, field: .port, submitLabel: .done, isTechnical: true) {
+                hostField(title: "Port", prompt: "22", text: $port, field: .port, submitLabel: .next, isTechnical: true) {
+                    focusedField = .name
+                }
+
+                hostField(title: "Label (Optional)", prompt: "Office Mac mini", text: $name, field: .name, submitLabel: .done) {
                     submit()
                 }
-                .keyboardType(.numberPad)
             }
         }
         .relayAppCard()
@@ -511,7 +603,7 @@ private struct AddTailnetHostSheet: View {
             Label("Stored On Device", systemImage: "internaldrive")
                 .font(.headline)
 
-            Text("Relay stores the host name, address, username, and port on this device so it can reconnect later. Passwords are requested only when needed and are not saved here.")
+            Text("Relay stores the label, IP address, username, and port on this device so it can reconnect later. Passwords are requested only when needed and are not saved here.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -524,14 +616,14 @@ private struct AddTailnetHostSheet: View {
             Button {
                 submit()
             } label: {
-                Text("Save Host")
+                Text(device == nil ? "Save Device" : "Update Device")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(RelayTheme.accent)
             .disabled(parsedHost == nil)
 
-            Text("Use a Tailscale IP or MagicDNS hostname that is already reachable from this device.")
+            Text("Use an IPv4 or IPv6 address that this device can reach over the network.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -551,7 +643,7 @@ private struct AddTailnetHostSheet: View {
         title: String,
         prompt: String,
         text: Binding<String>,
-        field: TailnetHostField,
+        field: AddDeviceField,
         submitLabel: SubmitLabel,
         isTechnical: Bool = false,
         onSubmit: @escaping () -> Void
@@ -564,29 +656,65 @@ private struct AddTailnetHostSheet: View {
             TextField(prompt, text: text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .keyboardType(
+                    field == .address
+                    ? .numbersAndPunctuation
+                    : field == .port
+                        ? .numberPad
+                        : .default
+                )
                 .focused($focusedField, equals: field)
                 .submitLabel(submitLabel)
                 .onSubmit(onSubmit)
                 .relayAppFieldBackground(isFocused: focusedField == field, isTechnical: isTechnical)
+
+            if field == .address, showAddressValidation {
+                Text("Enter a valid IPv4 or IPv6 address.")
+                    .font(.footnote)
+                    .foregroundStyle(RelayTheme.danger)
+            } else if field == .port, showPortValidation {
+                Text("Port must be between 1 and 65535.")
+                    .font(.footnote)
+                    .foregroundStyle(RelayTheme.danger)
+            }
         }
     }
 
-    private var parsedHost: SavedTailnetHost? {
+    private var showAddressValidation: Bool {
+        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedAddress.isEmpty && !trimmedAddress.isIPAddress
+    }
+
+    private var showPortValidation: Bool {
+        let trimmedPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPort.isEmpty else {
+            return false
+        }
+
+        guard let parsedPort = Int(trimmedPort) else {
+            return true
+        }
+
+        return !(1...65535).contains(parsedPort)
+    }
+
+    private var parsedHost: SavedDevice? {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedHostname = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !trimmedName.isEmpty,
-              !trimmedHostname.isEmpty,
+        guard !trimmedAddress.isEmpty,
+              trimmedAddress.isIPAddress,
               !trimmedUsername.isEmpty,
               let parsedPort = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)),
               (1...65535).contains(parsedPort) else {
             return nil
         }
 
-        return SavedTailnetHost(
-            name: trimmedName,
-            hostname: trimmedHostname,
+        return SavedDevice(
+            id: device?.id ?? UUID(),
+            name: trimmedName.isEmpty ? trimmedAddress : trimmedName,
+            hostname: trimmedAddress,
             port: parsedPort,
             username: trimmedUsername
         )
@@ -601,11 +729,11 @@ private struct AddTailnetHostSheet: View {
     }
 }
 
-private enum TailnetHostField: Hashable {
-    case name
-    case hostname
+private enum AddDeviceField: Hashable {
+    case address
     case username
     case port
+    case name
 }
 
 struct SSHLoginView: View {
@@ -613,7 +741,6 @@ struct SSHLoginView: View {
     let onConnect: (Host) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
     @State private var username: String
     @State private var password = ""
     @FocusState private var focusedField: SSHLoginField?
@@ -625,27 +752,19 @@ struct SSHLoginView: View {
     }
 
     var body: some View {
-        ZStack {
-            palette.backgroundColor
-                .ignoresSafeArea()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: RelayTheme.Spacing.section) {
-                    authenticationCard
-                    credentialsPanel
-                    securityPanel
-                }
-                .frame(maxWidth: 560, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 132)
-                .frame(maxWidth: .infinity)
+        ScrollView {
+            VStack(spacing: RelayTheme.Spacing.section) {
+                credentialsPanel
             }
+            .frame(maxWidth: 420)
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+            .padding(.bottom, 104)
+            .frame(maxWidth: .infinity)
         }
-        .navigationTitle("Authenticate")
+        .background(RelayTheme.surfaceBase.ignoresSafeArea())
+        .navigationTitle("Login")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(palette.surfaceColor, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 focusedField = .password
@@ -663,177 +782,67 @@ struct SSHLoginView: View {
         }
     }
 
-    private var palette: RelayTerminalPalette {
-        RelayTerminalPalette.palette(for: colorScheme)
-    }
-
-    private var authenticationCard: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
-            HStack(alignment: .top, spacing: RelayTheme.Spacing.compact) {
-                VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-                    Label("Password Authentication", systemImage: "lock.shield.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(palette.accentColor)
-
-                    Text(host.name)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(palette.textColor)
-
-                    Text("Enter the SSH password for this host to start a session.")
-                        .font(.callout)
-                        .foregroundStyle(palette.mutedColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-
-                Label("This Session", systemImage: "clock")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.warningColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule()
-                            .fill(palette.warningColor.opacity(0.14))
-                    )
-            }
-
-            Text("ssh \(username)@\(host.hostname) -p \(host.port)")
-                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 18, bold: true))
-                .foregroundStyle(palette.accentColor)
-                .textSelection(.enabled)
-
-            Divider()
-                .overlay(palette.subtleColor)
-
-            VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-                authenticationDetailRow(label: "Host", value: host.hostname)
-                authenticationDetailRow(label: "User", value: username)
-                authenticationDetailRow(label: "Port", value: "\(host.port)")
-            }
-        }
-        .relayTerminalPanel(palette)
-    }
-
     private var credentialsPanel: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.content) {
-            Text("Credentials")
-                .font(.headline)
-                .foregroundStyle(palette.textColor)
-
+        VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
             VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
                 Text("Username")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.mutedColor)
+                    .foregroundStyle(.secondary)
 
                 TextField("SSH username", text: $username)
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .focused($focusedField, equals: .username)
-                    .foregroundStyle(palette.textColor)
-                    .tint(palette.accentColor)
                     .submitLabel(.next)
                     .onSubmit {
                         focusedField = .password
                     }
             }
-            .relayTerminalFieldBackground(palette, isFocused: focusedField == .username)
+            .relayAppFieldBackground(isFocused: focusedField == .username, isTechnical: true)
 
             VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
                 Text("Password")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.mutedColor)
+                    .foregroundStyle(.secondary)
 
                 SecureField("Enter SSH password", text: $password)
                     .textContentType(.password)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .focused($focusedField, equals: .password)
-                    .foregroundStyle(palette.textColor)
-                    .tint(palette.accentColor)
                     .submitLabel(.go)
                     .onSubmit {
                         submit()
                     }
             }
-            .relayTerminalFieldBackground(palette, isFocused: focusedField == .password)
+            .relayAppFieldBackground(isFocused: focusedField == .password, isTechnical: true)
         }
-        .relayTerminalPanel(palette)
-    }
-
-    private var securityPanel: some View {
-        VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
-            Label("Password Handling", systemImage: "key.horizontal")
-                .font(.headline)
-                .foregroundStyle(palette.textColor)
-
-            Text("Relay uses the password for this login only. It is not stored on the device, and Relay can offer SSH key setup after a successful connection.")
-                .font(.footnote)
-                .foregroundStyle(palette.mutedColor)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: RelayTheme.Spacing.tight) {
-                securityChip("Not Stored", tint: palette.accentColor)
-                securityChip("Editable Username", tint: palette.mutedColor)
-            }
-        }
-        .relayTerminalPanel(palette)
+        .relayAppCard()
     }
 
     private var actionBar: some View {
-        VStack(spacing: RelayTheme.Spacing.tight) {
+        VStack(spacing: RelayTheme.Spacing.compact) {
             Button("Start Session") {
                 submit()
             }
             .buttonStyle(.borderedProminent)
-            .tint(palette.accentColor)
+            .tint(RelayTheme.accent)
             .disabled(!canSubmit)
-
-            Text("Relay will use this password once to establish the SSH session.")
-                .font(.footnote)
-                .foregroundStyle(palette.mutedColor)
-                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 20)
-        .background(palette.surfaceColor)
+        .background(Color(uiColor: .systemBackground))
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(palette.subtleColor.opacity(0.85))
+                .fill(RelayTheme.surfaceStroke)
                 .frame(height: 1)
         }
     }
 
     private var canSubmit: Bool {
         !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
-    }
-
-    private func authenticationDetailRow(label: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(palette.mutedColor)
-                .frame(width: 52, alignment: .leading)
-
-            Text(value)
-                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 12))
-                .foregroundStyle(palette.textColor)
-                .textSelection(.enabled)
-        }
-    }
-
-    private func securityChip(_ title: String, tint: Color) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(tint.opacity(0.14))
-            )
     }
 
     private func submit() {
@@ -861,8 +870,20 @@ private enum SSHLoginField: Hashable {
     case password
 }
 
+private extension PeerDevice {
+    var savedDeviceDraft: SavedDevice {
+        SavedDevice(
+            id: id,
+            name: name,
+            hostname: networkAddress,
+            port: port,
+            username: sshUsername
+        )
+    }
+}
+
 #Preview {
     NavigationStack {
-        HostListView(provider: TailscaleMeshProvider())
+        HostListView(provider: ManualDeviceProvider())
     }
 }

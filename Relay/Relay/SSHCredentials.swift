@@ -56,11 +56,23 @@ struct SSHStoredKeyMetadata: Codable, Hashable {
     let createdAt: Date
 }
 
+struct SSHStoredKeyRecord: Identifiable, Hashable {
+    let id: String
+    let remote: SSHRemoteIdentity
+    let metadata: SSHStoredKeyMetadata
+}
+
 struct TrustedSSHHostKey: Codable, Hashable {
     let algorithm: String
     let base64Payload: String
     let fingerprint: String
     let firstSeenAt: Date
+}
+
+struct TrustedSSHHostRecord: Identifiable, Hashable {
+    let id: String
+    let endpoint: SSHHostEndpointIdentity
+    let hostKey: TrustedSSHHostKey
 }
 
 struct SSHGeneratedKeyPair: Sendable {
@@ -241,6 +253,33 @@ final class SSHCredentialStore: @unchecked Sendable {
         clearStoredKeyRecord(for: remote, tag: tag)
     }
 
+    nonisolated func storedKeyRecords() -> [SSHStoredKeyRecord] {
+        lock.withLock {
+            keyMetadata()
+                .compactMap { storageKey, metadata in
+                    guard let remote = SSHRemoteIdentity(storageKey: storageKey) else {
+                        return nil
+                    }
+
+                    return SSHStoredKeyRecord(
+                        id: storageKey,
+                        remote: remote,
+                        metadata: metadata
+                    )
+                }
+                .sorted { lhs, rhs in
+                    lhs.remote.storageKey.localizedCaseInsensitiveCompare(rhs.remote.storageKey) == .orderedAscending
+                }
+        }
+    }
+
+    nonisolated func removeAllStoredKeys() {
+        let records = storedKeyRecords()
+        for record in records {
+            clearStoredKeyRecord(for: record.remote, tag: record.metadata.keychainTag)
+        }
+    }
+
     nonisolated func trustedHostKey(for endpoint: SSHHostEndpointIdentity) -> TrustedSSHHostKey? {
         lock.withLock {
             trustedHosts()[endpoint.storageKey]
@@ -252,6 +291,40 @@ final class SSHCredentialStore: @unchecked Sendable {
             var hosts = trustedHosts()
             hosts[endpoint.storageKey] = hostKey
             saveTrustedHosts(hosts)
+        }
+    }
+
+    nonisolated func trustedHostRecords() -> [TrustedSSHHostRecord] {
+        lock.withLock {
+            trustedHosts()
+                .compactMap { storageKey, hostKey in
+                    guard let endpoint = SSHHostEndpointIdentity(storageKey: storageKey) else {
+                        return nil
+                    }
+
+                    return TrustedSSHHostRecord(
+                        id: storageKey,
+                        endpoint: endpoint,
+                        hostKey: hostKey
+                    )
+                }
+                .sorted { lhs, rhs in
+                    lhs.endpoint.storageKey.localizedCaseInsensitiveCompare(rhs.endpoint.storageKey) == .orderedAscending
+                }
+        }
+    }
+
+    nonisolated func removeTrustedHostKey(for endpoint: SSHHostEndpointIdentity) {
+        lock.withLock {
+            var hosts = trustedHosts()
+            hosts.removeValue(forKey: endpoint.storageKey)
+            saveTrustedHosts(hosts)
+        }
+    }
+
+    nonisolated func removeAllTrustedHostKeys() {
+        lock.withLock {
+            saveTrustedHosts([:])
         }
     }
 
@@ -271,6 +344,18 @@ final class SSHCredentialStore: @unchecked Sendable {
             dismissed.insert(remote.storageKey)
             saveDismissedSetupPrompts(dismissed)
         }
+    }
+
+    nonisolated func resetDismissedKeySetupPrompts() {
+        lock.withLock {
+            saveDismissedSetupPrompts(Set<String>())
+        }
+    }
+
+    nonisolated func eraseAllData() {
+        removeAllStoredKeys()
+        removeAllTrustedHostKeys()
+        resetDismissedKeySetupPrompts()
     }
 
     private func keychainTag(for remote: SSHRemoteIdentity) -> String {
@@ -421,5 +506,27 @@ private extension NSLock {
             unlock()
         }
         return body()
+    }
+}
+
+private extension SSHRemoteIdentity {
+    init?(storageKey: String) {
+        let components = storageKey.split(separator: ":", maxSplits: 2).map(String.init)
+        guard components.count == 3, let port = Int(components[1]) else {
+            return nil
+        }
+
+        self.init(hostname: components[0], port: port, username: components[2])
+    }
+}
+
+private extension SSHHostEndpointIdentity {
+    init?(storageKey: String) {
+        let components = storageKey.split(separator: ":", maxSplits: 1).map(String.init)
+        guard components.count == 2, let port = Int(components[1]) else {
+            return nil
+        }
+
+        self.init(hostname: components[0], port: port)
     }
 }

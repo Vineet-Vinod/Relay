@@ -9,10 +9,16 @@ import SwiftUI
 
 @MainActor
 struct ContentView: View {
+    private enum Tab: Hashable {
+        case devices
+        case settings
+    }
+
     private let provider: any MeshProvider
+    @State private var selectedTab: Tab = .devices
 
     init() {
-        self.provider = TailscaleMeshProvider()
+        self.provider = ManualDeviceProvider()
     }
 
     init(provider: any MeshProvider) {
@@ -20,8 +26,22 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            HostListView(provider: provider)
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                HostListView(provider: provider)
+            }
+            .tabItem {
+                Label("Devices", systemImage: "desktopcomputer")
+            }
+            .tag(Tab.devices)
+
+            NavigationStack {
+                SettingsView(provider: provider)
+            }
+            .tabItem {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .tag(Tab.settings)
         }
     }
 }

@@ -32,13 +32,16 @@ final class RealSSHClient: SSHClient {
 
         let authentication = try resolveAuthentication(for: host)
         let emit = eventEmitter()
+        let timeoutSeconds = RelayPreferences.shared.connectionTimeoutSeconds
 
-        self.session = try await SSHConnectionSession.connect(
-            to: host,
-            authentication: authentication,
-            trustStore: credentials,
-            eventSink: emit
-        )
+        self.session = try await withTimeout(seconds: timeoutSeconds) {
+            try await SSHConnectionSession.connect(
+                to: host,
+                authentication: authentication,
+                trustStore: self.credentials,
+                eventSink: emit
+            )
+        }
 
         emit(.status(authentication.connectedMessage))
     }
@@ -50,12 +53,15 @@ final class RealSSHClient: SSHClient {
 
         let keyPair = SSHGeneratedKeyPair.generate(comment: host.savedKeyComment)
         let installCommand = SSHAuthorizedKeysInstaller.installCommand(for: keyPair.authorizedKey)
-        let installResult = try await SSHConnectionSession.runCommand(
-            to: host,
-            authentication: .password(password),
-            trustStore: credentials,
-            command: installCommand
-        )
+        let timeoutSeconds = RelayPreferences.shared.connectionTimeoutSeconds
+        let installResult = try await withTimeout(seconds: timeoutSeconds) {
+            try await SSHConnectionSession.runCommand(
+                to: host,
+                authentication: .password(password),
+                trustStore: self.credentials,
+                command: installCommand
+            )
+        }
 
         guard installResult.exitStatus == 0 else {
             let stderr = installResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -68,11 +74,13 @@ final class RealSSHClient: SSHClient {
         }
 
         do {
-            try await SSHConnectionSession.verifyConnection(
-                to: host,
-                authentication: .privateKey(keyPair.nioPrivateKey),
-                trustStore: credentials
-            )
+            try await withTimeout(seconds: timeoutSeconds) {
+                try await SSHConnectionSession.verifyConnection(
+                    to: host,
+                    authentication: .privateKey(keyPair.nioPrivateKey),
+                    trustStore: self.credentials
+                )
+            }
         } catch let error as SSHClientError {
             switch error {
             case .hostKeyMismatch, .unsupportedHostKey:
@@ -135,6 +143,29 @@ final class RealSSHClient: SSHClient {
             }
         }
     }
+
+    private func withTimeout<T: Sendable>(
+        seconds: Int,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw SSHClientError.connectionTimedOut(seconds: seconds)
+            }
+
+            guard let result = try await group.next() else {
+                throw SSHClientError.connectionTimedOut(seconds: seconds)
+            }
+
+            group.cancelAll()
+            return result
+        }
+    }
 }
 
 private enum SSHConnectionAuthentication {
@@ -151,7 +182,7 @@ private enum SSHConnectionAuthentication {
     }
 }
 
-private struct SSHCommandResult {
+private struct SSHCommandResult: Sendable {
     let stdout: String
     let stderr: String
     let exitStatus: Int32
@@ -163,7 +194,7 @@ private struct ConnectedRoot {
     let sshHandler: SSHHandlerBox
 }
 
-private final class SSHConnectionSession {
+private final class SSHConnectionSession: @unchecked Sendable {
     private let group: NIOTSEventLoopGroup
     private let rootChannel: Channel
     private let shellChannel: Channel
