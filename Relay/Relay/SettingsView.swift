@@ -18,6 +18,8 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
     @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.automaticallyReconnect) private var automaticallyReconnect = true
+    @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = 0.5
+    @AppStorage(RelayDefaultsKey.voiceSpeaksToolStatus) private var voiceSpeaksToolStatus = false
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
     @State private var storedKeys: [SSHStoredKeyRecord] = []
@@ -119,6 +121,22 @@ struct SettingsView: View {
                 Toggle("Reconnect Automatically", isOn: $automaticallyReconnect)
             } header: {
                 Text("Terminal")
+            }
+
+            Section {
+                Stepper(value: voiceSpeechRateBinding, in: 0.35...0.6, step: 0.05) {
+                    settingsValueRow(
+                        title: "Speech Rate",
+                        value: voiceSpeechRateLabel,
+                        detail: nil
+                    )
+                }
+
+                Toggle("Speak Tool Status", isOn: $voiceSpeaksToolStatus)
+            } header: {
+                Text("Voice")
+            } footer: {
+                Text("Relay uses on-device speech recognition and text-to-speech to keep Codex usable while the screen is not your primary focus.")
             }
 
             Section {
@@ -324,6 +342,17 @@ struct SettingsView: View {
         }
 
         return "\(clampedSize.formatted(.number.precision(.fractionLength(1)))) pt"
+    }
+
+    private var voiceSpeechRateBinding: Binding<Double> {
+        Binding(
+            get: { min(max(voiceSpeechRate, 0.35), 0.6) },
+            set: { voiceSpeechRate = min(max($0, 0.35), 0.6) }
+        )
+    }
+
+    private var voiceSpeechRateLabel: String {
+        voiceSpeechRateBinding.wrappedValue.formatted(.number.precision(.fractionLength(2)))
     }
 
     private func overviewMetric(title: String, value: String) -> some View {

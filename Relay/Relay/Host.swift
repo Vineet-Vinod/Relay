@@ -13,6 +13,7 @@ struct Host: Identifiable, Hashable, Codable {
     var hostname: String
     var port: Int
     var username: String
+    var defaultCodexPath: String?
     var authentication: SSHAuthenticationMode
 
     init(
@@ -21,6 +22,7 @@ struct Host: Identifiable, Hashable, Codable {
         hostname: String,
         port: Int = 22,
         username: String,
+        defaultCodexPath: String? = nil,
         authentication: SSHAuthenticationMode = .automatic
     ) {
         self.id = id
@@ -28,6 +30,7 @@ struct Host: Identifiable, Hashable, Codable {
         self.hostname = hostname
         self.port = port
         self.username = username
+        self.defaultCodexPath = defaultCodexPath
         self.authentication = authentication
     }
 }
@@ -42,6 +45,7 @@ extension Host {
             hostname: peer.meshHostname ?? peer.networkAddress,
             port: peer.port,
             username: peer.sshUsername,
+            defaultCodexPath: nil,
             authentication: authentication
         )
     }

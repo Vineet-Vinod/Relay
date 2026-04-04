@@ -18,8 +18,12 @@ struct HostListView: View {
     @State private var detailPeer: PeerDevice?
     @State private var deviceEditor: DeviceEditorContext?
     @State private var loginHost: Host?
-    @State private var pendingDestinationHost: Host?
+    @State private var pendingAuthenticatedHost: Host?
+    @State private var pendingLoginSessionKind: SessionKind = .terminal
+    @State private var pendingLoginSavedDevice: SavedDevice?
     @State private var destinationHost: Host?
+    @State private var voiceWorkspaceDraft: VoiceWorkspaceDraft?
+    @State private var activeVoiceSession: VoiceSessionConfiguration?
 
     var body: some View {
         List {
@@ -46,12 +50,33 @@ struct HostListView: View {
         .refreshable {
             await refresh()
         }
-        .sheet(item: $loginHost, onDismiss: presentPendingDestinationIfNeeded) { host in
+        .sheet(item: $loginHost, onDismiss: presentPendingAuthenticatedHostIfNeeded) { host in
             NavigationStack {
                 SSHLoginView(host: host) { authenticatedHost in
-                    pendingDestinationHost = authenticatedHost
+                    pendingAuthenticatedHost = authenticatedHost
                 }
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $voiceWorkspaceDraft) { draft in
+            VoiceWorkspacePickerView(
+                host: draft.host,
+                initialWorkspacePath: draft.initialWorkspacePath,
+                supportsSavingDefault: provider.supportsManualHostManagement && draft.savedDevice != nil,
+                onCancel: {
+                    voiceWorkspaceDraft = nil
+                },
+                onStart: { workspacePath, saveDefault in
+                    Task {
+                        await startVoiceSession(
+                            from: draft,
+                            workspacePath: workspacePath,
+                            persistAsDefault: saveDefault
+                        )
+                    }
+                }
+            )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
@@ -65,7 +90,10 @@ struct HostListView: View {
             .presentationDragIndicator(.visible)
         }
         .navigationDestination(item: $destinationHost) { host in
-            TerminalView(viewModel: TerminalSessionViewModel(host: host))
+            TerminalWorkspaceView(provider: provider, initialHost: host)
+        }
+        .fullScreenCover(item: $activeVoiceSession) { configuration in
+            VoiceSessionView(configuration: configuration)
         }
         .navigationDestination(item: $detailPeer) { peer in
             DeviceDetailView(
@@ -76,7 +104,12 @@ struct HostListView: View {
                 },
                 onConnect: {
                     Task {
-                        await resolveEndpoint(for: peer)
+                        await resolveEndpoint(for: peer, sessionKind: .terminal)
+                    }
+                },
+                onTalkToCodex: {
+                    Task {
+                        await resolveEndpoint(for: peer, sessionKind: .voiceCodex)
                     }
                 }
             )
@@ -220,7 +253,7 @@ struct HostListView: View {
         HStack(spacing: RelayTheme.Spacing.compact) {
             Button {
                 Task {
-                    await resolveEndpoint(for: peer)
+                    await resolveEndpoint(for: peer, sessionKind: .terminal)
                 }
             } label: {
                 HStack(alignment: .center, spacing: RelayTheme.Spacing.compact) {
@@ -364,7 +397,7 @@ struct HostListView: View {
         }
     }
 
-    private func resolveEndpoint(for peer: PeerDevice) async {
+    private func resolveEndpoint(for peer: PeerDevice, sessionKind: SessionKind) async {
         guard peer.isOnline else { return }
 
         resolvingPeerID = peer.id
@@ -378,8 +411,14 @@ struct HostListView: View {
             let host = try await provider.endpoint(for: peer)
             if RelayPreferences.shared.usesSavedKeysAutomatically,
                RelayServices.sshCredentials.hasStoredKey(for: host.remoteIdentity) {
-                destinationHost = host
+                presentResolvedHost(
+                    host,
+                    sessionKind: sessionKind,
+                    savedDevice: peer.savedDeviceDraft
+                )
             } else {
+                pendingLoginSessionKind = sessionKind
+                pendingLoginSavedDevice = peer.savedDeviceDraft
                 loginHost = host
             }
         } catch {
@@ -387,14 +426,71 @@ struct HostListView: View {
         }
     }
 
-    private func presentPendingDestinationIfNeeded() {
-        guard let pendingDestinationHost else { return }
-        self.pendingDestinationHost = nil
-        destinationHost = pendingDestinationHost
+    private func presentPendingAuthenticatedHostIfNeeded() {
+        guard let pendingAuthenticatedHost else { return }
+
+        let sessionKind = pendingLoginSessionKind
+        let savedDevice = pendingLoginSavedDevice
+
+        self.pendingAuthenticatedHost = nil
+        self.pendingLoginSavedDevice = nil
+        self.pendingLoginSessionKind = .terminal
+
+        presentResolvedHost(
+            pendingAuthenticatedHost,
+            sessionKind: sessionKind,
+            savedDevice: savedDevice
+        )
     }
 
     private func presentAddDeviceSheet() {
         deviceEditor = DeviceEditorContext(device: nil)
+    }
+
+    private func presentResolvedHost(
+        _ host: Host,
+        sessionKind: SessionKind,
+        savedDevice: SavedDevice?
+    ) {
+        switch sessionKind {
+        case .terminal:
+            destinationHost = host
+        case .voiceCodex:
+            voiceWorkspaceDraft = VoiceWorkspaceDraft(
+                host: host,
+                initialWorkspacePath: savedDevice?.defaultCodexPath ?? host.defaultCodexPath ?? "",
+                savedDevice: savedDevice
+            )
+        }
+    }
+
+    private func startVoiceSession(
+        from draft: VoiceWorkspaceDraft,
+        workspacePath: String,
+        persistAsDefault: Bool
+    ) async {
+        let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedWorkspacePath.isEmpty else { return }
+
+        if persistAsDefault, var savedDevice = draft.savedDevice {
+            savedDevice.defaultCodexPath = trimmedWorkspacePath
+
+            do {
+                try await provider.saveHost(savedDevice)
+                await refresh()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+
+        voiceWorkspaceDraft = nil
+
+        var host = draft.host
+        host.defaultCodexPath = trimmedWorkspacePath
+        activeVoiceSession = VoiceSessionConfiguration(
+            host: host,
+            workspacePath: trimmedWorkspacePath
+        )
     }
 }
 
@@ -413,6 +509,7 @@ private struct DeviceDetailView: View {
     let isConnecting: Bool
     let onEdit: () -> Void
     let onConnect: () -> Void
+    let onTalkToCodex: () -> Void
 
     var body: some View {
         List {
@@ -443,12 +540,21 @@ private struct DeviceDetailView: View {
                                 .controlSize(.small)
                         }
 
-                        Text(peer.isOnline ? "Connect" : "Offline")
+                        Text(peer.isOnline ? "Open Terminal" : "Offline")
                             .frame(maxWidth: .infinity)
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(RelayTheme.accent)
+                .disabled(!peer.isOnline || isConnecting)
+
+                Button {
+                    onTalkToCodex()
+                } label: {
+                    Label("Talk to Codex", systemImage: "waveform.and.mic")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
                 .disabled(!peer.isOnline || isConnecting)
             }
         }
@@ -514,6 +620,7 @@ private struct AddDeviceSheet: View {
     @State private var address = ""
     @State private var username = ""
     @State private var port = "22"
+    @State private var defaultCodexPath = ""
     @FocusState private var focusedField: AddDeviceField?
 
     init(device: SavedDevice? = nil, onSave: @escaping (SavedDevice) -> Void) {
@@ -523,6 +630,7 @@ private struct AddDeviceSheet: View {
         _address = State(initialValue: device?.hostname ?? "")
         _username = State(initialValue: device?.username ?? "")
         _port = State(initialValue: String(device?.port ?? 22))
+        _defaultCodexPath = State(initialValue: device?.defaultCodexPath ?? "")
     }
 
     var body: some View {
@@ -587,6 +695,10 @@ private struct AddDeviceSheet: View {
                 }
 
                 hostField(title: "Port", prompt: "22", text: $port, field: .port, submitLabel: .next, isTechnical: true) {
+                    focusedField = .workspace
+                }
+
+                hostField(title: "Codex Workspace (Optional)", prompt: "~/Projects/Relay", text: $defaultCodexPath, field: .workspace, submitLabel: .next, isTechnical: true) {
                     focusedField = .name
                 }
 
@@ -702,6 +814,7 @@ private struct AddDeviceSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCodexPath = defaultCodexPath.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedAddress.isEmpty,
               trimmedAddress.isIPAddress,
@@ -716,7 +829,8 @@ private struct AddDeviceSheet: View {
             name: trimmedName.isEmpty ? trimmedAddress : trimmedName,
             hostname: trimmedAddress,
             port: parsedPort,
-            username: trimmedUsername
+            username: trimmedUsername,
+            defaultCodexPath: trimmedCodexPath.isEmpty ? nil : trimmedCodexPath
         )
     }
 
@@ -733,6 +847,7 @@ private enum AddDeviceField: Hashable {
     case address
     case username
     case port
+    case workspace
     case name
 }
 
@@ -855,6 +970,7 @@ struct SSHLoginView: View {
             hostname: host.hostname,
             port: host.port,
             username: trimmedUsername,
+            defaultCodexPath: host.defaultCodexPath,
             authentication: .password(password)
         )
         focusedField = nil
@@ -877,9 +993,17 @@ private extension PeerDevice {
             name: name,
             hostname: networkAddress,
             port: port,
-            username: sshUsername
+            username: sshUsername,
+            defaultCodexPath: nil
         )
     }
+}
+
+private struct VoiceWorkspaceDraft: Identifiable {
+    let id = UUID()
+    let host: Host
+    let initialWorkspacePath: String
+    let savedDevice: SavedDevice?
 }
 
 #Preview {

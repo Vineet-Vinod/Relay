@@ -16,6 +16,8 @@ enum RelayDefaultsKey {
     static let bellBehavior = "relay.preferences.bell-behavior.v1"
     static let keepScreenAwake = "relay.preferences.keep-screen-awake.v1"
     static let automaticallyReconnect = "relay.preferences.automatically-reconnect.v1"
+    static let voiceSpeechRate = "relay.preferences.voice-speech-rate.v1"
+    static let voiceSpeaksToolStatus = "relay.preferences.voice-speaks-tool-status.v1"
 
     static let all = [
         useSavedKeysAutomatically,
@@ -25,6 +27,8 @@ enum RelayDefaultsKey {
         bellBehavior,
         keepScreenAwake,
         automaticallyReconnect,
+        voiceSpeechRate,
+        voiceSpeaksToolStatus,
     ]
 }
 
@@ -106,6 +110,15 @@ struct RelayPreferences {
         defaults.object(forKey: RelayDefaultsKey.automaticallyReconnect) as? Bool ?? true
     }
 
+    var voiceSpeechRate: Double {
+        let storedValue = defaults.object(forKey: RelayDefaultsKey.voiceSpeechRate) as? Double ?? 0.5
+        return min(max(storedValue, 0.35), 0.6)
+    }
+
+    var voiceSpeaksToolStatus: Bool {
+        defaults.object(forKey: RelayDefaultsKey.voiceSpeaksToolStatus) as? Bool ?? false
+    }
+
     func reset() {
         RelayDefaultsKey.all.forEach { defaults.removeObject(forKey: $0) }
         registerDefaults()
@@ -120,6 +133,8 @@ struct RelayPreferences {
             RelayDefaultsKey.bellBehavior: RelayBellBehavior.haptic.rawValue,
             RelayDefaultsKey.keepScreenAwake: true,
             RelayDefaultsKey.automaticallyReconnect: true,
+            RelayDefaultsKey.voiceSpeechRate: 0.5,
+            RelayDefaultsKey.voiceSpeaksToolStatus: false,
         ])
     }
 }
