@@ -57,7 +57,7 @@ extension SSHClient {
 
 enum SSHClientFactory {
     @MainActor
-    static func makeClient() -> SSHClient {
+    static func makeDirectClient() -> SSHClient {
         RealSSHClient()
     }
 }

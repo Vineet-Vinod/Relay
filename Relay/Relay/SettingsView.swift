@@ -21,6 +21,9 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
     @AppStorage(RelayDefaultsKey.voiceOutputVolume) private var voiceOutputVolume = RelayVoicePreference.defaultOutputVolume
     @AppStorage(RelayDefaultsKey.voiceSpeaksToolStatus) private var voiceSpeaksToolStatus = false
+    @AppStorage(RelayDefaultsKey.meshProviderKind) private var meshProviderKindRawValue = MeshProviderKind.tailscale.rawValue
+    @AppStorage(RelayDefaultsKey.relayServerURL) private var relayServerURL = ""
+    @AppStorage(RelayDefaultsKey.relayAllowInsecureTLS) private var relayAllowInsecureTLS = false
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
     @State private var storedKeys: [SSHStoredKeyRecord] = []
@@ -31,6 +34,7 @@ struct SettingsView: View {
     @State private var exportDocument = SavedDevicesDocument(devices: [])
     @State private var destructiveAction: SettingsDestructiveAction?
     @State private var notice: SettingsNotice?
+    @State private var relaySettingsController = RelaySettingsController()
 
     var body: some View {
         List {
@@ -46,6 +50,12 @@ struct SettingsView: View {
                     value: provider.displayName,
                     detail: providerSnapshot.status.title
                 )
+
+                Picker("Provider", selection: $meshProviderKindRawValue) {
+                    ForEach(MeshProviderKind.allCases) { kind in
+                        Text(kind.title).tag(kind.rawValue)
+                    }
+                }
 
                 Toggle("Use Saved SSH Keys", isOn: $usesSavedKeysAutomatically)
 
@@ -63,6 +73,13 @@ struct SettingsView: View {
             } footer: {
                 Text(providerSnapshot.status.detail)
             }
+
+            RelaySettingsSection(
+                controller: relaySettingsController,
+                serverURL: $relayServerURL,
+                allowInsecureTLS: $relayAllowInsecureTLS,
+                isSelected: selectedProviderKind == .relay
+            )
 
             Section {
                 NavigationLink {
@@ -368,6 +385,10 @@ struct SettingsView: View {
         )
     }
 
+    private var selectedProviderKind: MeshProviderKind {
+        MeshProviderKind(rawValue: meshProviderKindRawValue) ?? .tailscale
+    }
+
     private var voiceSpeechSpeedLabel: String {
         RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate)
     }
@@ -428,6 +449,7 @@ struct SettingsView: View {
         providerSnapshot = await provider.currentSnapshot()
         savedDevices = await SavedDeviceStore.shared.hosts()
         reloadCredentialData()
+        relaySettingsController.load()
     }
 
     private func reloadCredentialData() {
@@ -498,6 +520,8 @@ struct SettingsView: View {
                 message: "Relay removed locally stored SSH private keys from the Keychain."
             )
         case .eraseRelayData:
+            RelayServices.relayConfiguration.clearRegistration()
+            relaySettingsController.load()
             RelayServices.sshCredentials.eraseAllData()
             await SavedDeviceStore.shared.eraseAll()
             RelayPreferences.shared.reset()

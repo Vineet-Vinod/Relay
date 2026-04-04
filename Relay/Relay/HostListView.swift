@@ -99,6 +99,7 @@ struct HostListView: View {
             DeviceDetailView(
                 peer: peer,
                 isConnecting: resolvingPeerID == peer.id,
+                canEdit: provider.supportsManualHostManagement,
                 onEdit: {
                     deviceEditor = DeviceEditorContext(device: peer.savedDeviceDraft)
                 },
@@ -115,14 +116,16 @@ struct HostListView: View {
             )
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    presentAddDeviceSheet()
-                } label: {
-                    Image(systemName: "plus")
+            if provider.supportsManualHostManagement {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        presentAddDeviceSheet()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .disabled(isLoading)
+                    .accessibilityLabel("Add device")
                 }
-                .disabled(isLoading)
-                .accessibilityLabel("Add device")
             }
         }
     }
@@ -171,13 +174,15 @@ struct HostListView: View {
                 Text("No Devices")
                     .font(.headline)
 
-                Button {
-                    presentAddDeviceSheet()
-                } label: {
-                    Label("Add Device", systemImage: "plus")
+                if provider.supportsManualHostManagement {
+                    Button {
+                        presentAddDeviceSheet()
+                    } label: {
+                        Label("Add Device", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(RelayTheme.accent)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(RelayTheme.accent)
             }
         }
         .frame(maxWidth: .infinity)
@@ -270,7 +275,7 @@ struct HostListView: View {
                         Text(peer.name)
                             .font(.headline)
 
-                        Text(peer.networkAddress)
+                        Text(peer.displayAddress)
                             .font(TerminalFontRegistry.terminalSwiftUIFont(size: 14))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -409,7 +414,14 @@ struct HostListView: View {
 
         do {
             let host = try await provider.endpoint(for: peer)
-            if RelayPreferences.shared.usesSavedKeysAutomatically,
+            if host.usesRelayTransport {
+                guard sessionKind == .terminal else {
+                    errorMessage = "Relay devices do not support Talk to Codex yet."
+                    return
+                }
+
+                presentResolvedHost(host, sessionKind: .terminal, savedDevice: nil)
+            } else if RelayPreferences.shared.usesSavedKeysAutomatically,
                RelayServices.sshCredentials.hasStoredKey(for: host.remoteIdentity) {
                 presentResolvedHost(
                     host,
@@ -507,6 +519,7 @@ private struct DeviceEditorContext: Identifiable {
 private struct DeviceDetailView: View {
     let peer: PeerDevice
     let isConnecting: Bool
+    let canEdit: Bool
     let onEdit: () -> Void
     let onConnect: () -> Void
     let onTalkToCodex: () -> Void
@@ -518,9 +531,16 @@ private struct DeviceDetailView: View {
             }
 
             Section("Connection") {
-                detailRow(title: "Address", value: peer.networkAddress, monospaced: true)
-                detailRow(title: "User", value: peer.sshUsername, monospaced: true)
-                detailRow(title: "Port", value: "\(peer.port)", monospaced: true)
+                detailRow(
+                    title: peer.connectionKind == .relay ? "Route" : "Address",
+                    value: peer.displayAddress,
+                    monospaced: true
+                )
+
+                if peer.connectionKind == .ssh {
+                    detailRow(title: "User", value: peer.sshUsername, monospaced: true)
+                    detailRow(title: "Port", value: "\(peer.port)", monospaced: true)
+                }
             }
 
             if peer.operatingSystem != "Direct SSH" || peer.ownerName != "Saved Device" {
@@ -555,7 +575,7 @@ private struct DeviceDetailView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(!peer.isOnline || isConnecting)
+                .disabled(!peer.isOnline || isConnecting || !peer.supportsVoiceSession)
             }
         }
         .listStyle(.insetGrouped)
@@ -564,9 +584,11 @@ private struct DeviceDetailView: View {
         .navigationTitle(peer.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Edit") {
-                    onEdit()
+            if canEdit {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") {
+                        onEdit()
+                    }
                 }
             }
         }
@@ -587,7 +609,7 @@ private struct DeviceDetailView: View {
                 Text(peer.isOnline ? "Online" : "Offline")
                     .font(.headline)
 
-                Text(peer.networkAddress)
+                Text(peer.displayAddress)
                     .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -667,11 +689,11 @@ private struct AddDeviceSheet: View {
 
     private var introCard: some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.compact) {
-            Label(device == nil ? "Connect By IP Address" : "Update Device Details", systemImage: "point.3.connected.trianglepath.dotted")
+            Label(device == nil ? "Connect By Hostname Or IP" : "Update Device Details", systemImage: "point.3.connected.trianglepath.dotted")
                 .font(.title3.weight(.semibold))
 
             Text(device == nil
-                 ? "Save a device with its IP address so Relay can check whether SSH is reachable and reconnect later."
+                 ? "Save a device with its Tailscale hostname or IP address so Relay can check whether SSH is reachable and reconnect later."
                  : "Change the label, address, username, or port Relay should use the next time you connect.")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -686,7 +708,7 @@ private struct AddDeviceSheet: View {
                 .font(.headline)
 
             VStack(spacing: 14) {
-                hostField(title: "IP Address", prompt: "192.168.1.24", text: $address, field: .address, submitLabel: .next, isTechnical: true) {
+                hostField(title: "Host", prompt: "macbook.tailnet.ts.net", text: $address, field: .address, submitLabel: .next, isTechnical: true) {
                     focusedField = .username
                 }
 
@@ -715,7 +737,7 @@ private struct AddDeviceSheet: View {
             Label("Stored On Device", systemImage: "internaldrive")
                 .font(.headline)
 
-            Text("Relay stores the label, IP address, username, and port on this device so it can reconnect later. Passwords are requested only when needed and are not saved here.")
+            Text("Relay stores the label, hostname or IP address, username, and port on this device so it can reconnect later. Passwords are requested only when needed and are not saved here.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -735,7 +757,7 @@ private struct AddDeviceSheet: View {
             .tint(RelayTheme.accent)
             .disabled(parsedHost == nil)
 
-            Text("Use an IPv4 or IPv6 address that this device can reach over the network.")
+            Text("Use a Tailscale hostname or IP address that this device can reach over the network.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -770,7 +792,7 @@ private struct AddDeviceSheet: View {
                 .autocorrectionDisabled()
                 .keyboardType(
                     field == .address
-                    ? .numbersAndPunctuation
+                    ? .URL
                     : field == .port
                         ? .numberPad
                         : .default
@@ -781,7 +803,7 @@ private struct AddDeviceSheet: View {
                 .relayAppFieldBackground(isFocused: focusedField == field, isTechnical: isTechnical)
 
             if field == .address, showAddressValidation {
-                Text("Enter a valid IPv4 or IPv6 address.")
+                Text("Enter a valid hostname, IPv4 address, or IPv6 address.")
                     .font(.footnote)
                     .foregroundStyle(RelayTheme.danger)
             } else if field == .port, showPortValidation {
@@ -794,7 +816,7 @@ private struct AddDeviceSheet: View {
 
     private var showAddressValidation: Bool {
         let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmedAddress.isEmpty && !trimmedAddress.isIPAddress
+        return !trimmedAddress.isEmpty && !trimmedAddress.isValidRelayHost
     }
 
     private var showPortValidation: Bool {
@@ -817,7 +839,7 @@ private struct AddDeviceSheet: View {
         let trimmedCodexPath = defaultCodexPath.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedAddress.isEmpty,
-              trimmedAddress.isIPAddress,
+              trimmedAddress.isValidRelayHost,
               !trimmedUsername.isEmpty,
               let parsedPort = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)),
               (1...65535).contains(parsedPort) else {

@@ -19,6 +19,9 @@ enum RelayDefaultsKey {
     static let voiceSpeechRate = "relay.preferences.voice-speech-rate.v1"
     static let voiceOutputVolume = "relay.preferences.voice-output-volume.v1"
     static let voiceSpeaksToolStatus = "relay.preferences.voice-speaks-tool-status.v1"
+    static let meshProviderKind = "relay.preferences.mesh-provider-kind.v1"
+    static let relayServerURL = "relay.preferences.relay-server-url.v1"
+    static let relayAllowInsecureTLS = "relay.preferences.relay-allow-insecure-tls.v1"
 
     static let all = [
         useSavedKeysAutomatically,
@@ -31,6 +34,9 @@ enum RelayDefaultsKey {
         voiceSpeechRate,
         voiceOutputVolume,
         voiceSpeaksToolStatus,
+        meshProviderKind,
+        relayServerURL,
+        relayAllowInsecureTLS,
     ]
 }
 
@@ -171,6 +177,15 @@ struct RelayPreferences {
         defaults.object(forKey: RelayDefaultsKey.voiceSpeaksToolStatus) as? Bool ?? false
     }
 
+    var meshProviderKind: MeshProviderKind {
+        guard let rawValue = defaults.string(forKey: RelayDefaultsKey.meshProviderKind),
+              let kind = MeshProviderKind(rawValue: rawValue) else {
+            return .tailscale
+        }
+
+        return kind
+    }
+
     func reset() {
         RelayDefaultsKey.all.forEach { defaults.removeObject(forKey: $0) }
         registerDefaults()
@@ -188,6 +203,9 @@ struct RelayPreferences {
             RelayDefaultsKey.voiceSpeechRate: RelayVoicePreference.defaultSpeechRate,
             RelayDefaultsKey.voiceOutputVolume: RelayVoicePreference.defaultOutputVolume,
             RelayDefaultsKey.voiceSpeaksToolStatus: false,
+            RelayDefaultsKey.meshProviderKind: MeshProviderKind.tailscale.rawValue,
+            RelayDefaultsKey.relayServerURL: "",
+            RelayDefaultsKey.relayAllowInsecureTLS: false,
         ])
     }
 }

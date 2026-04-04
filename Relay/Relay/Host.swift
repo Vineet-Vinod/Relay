@@ -15,6 +15,7 @@ struct Host: Identifiable, Hashable, Codable {
     var username: String
     var defaultCodexPath: String?
     var authentication: SSHAuthenticationMode
+    var transport: HostTransport
 
     init(
         id: UUID = UUID(),
@@ -23,7 +24,8 @@ struct Host: Identifiable, Hashable, Codable {
         port: Int = 22,
         username: String,
         defaultCodexPath: String? = nil,
-        authentication: SSHAuthenticationMode = .automatic
+        authentication: SSHAuthenticationMode = .automatic,
+        transport: HostTransport = .directSSH
     ) {
         self.id = id
         self.name = name
@@ -32,6 +34,7 @@ struct Host: Identifiable, Hashable, Codable {
         self.username = username
         self.defaultCodexPath = defaultCodexPath
         self.authentication = authentication
+        self.transport = transport
     }
 }
 
@@ -46,7 +49,8 @@ extension Host {
             port: peer.port,
             username: peer.sshUsername,
             defaultCodexPath: nil,
-            authentication: authentication
+            authentication: authentication,
+            transport: .directSSH
         )
     }
 
@@ -64,6 +68,18 @@ extension Host {
 
     var usesPasswordAuthentication: Bool {
         authentication.usesPassword
+    }
+
+    var usesRelayTransport: Bool {
+        if case .relay = transport {
+            return true
+        }
+
+        return false
+    }
+
+    var supportsVoiceCodex: Bool {
+        !usesRelayTransport
     }
 
     var savedKeyComment: String {

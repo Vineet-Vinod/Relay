@@ -25,44 +25,50 @@ final class TerminalSessionViewModel {
     var pendingHostTrust: SSHHostTrustChallenge?
 
     var onTerminalOutput: (@MainActor ([UInt8]) -> Void)?
+    var supportsVoiceSession: Bool { host.supportsVoiceCodex }
+    var isDirectSSHSession: Bool { !host.usesRelayTransport }
 
-    private let client: SSHClient
     private let credentials: SSHCredentialStore
+    private var client: TerminalSessionClient
     private var isDisconnectingManually = false
 
-    init(host: Host, client: SSHClient? = nil, credentials: SSHCredentialStore = RelayServices.sshCredentials) {
+    init(host: Host, client: TerminalSessionClient? = nil, credentials: SSHCredentialStore = RelayServices.sshCredentials) {
         self.host = host
-        self.client = client ?? SSHClientFactory.makeClient()
+        self.client = client ?? TerminalSessionClientFactory.makeClient(for: host)
         self.credentials = credentials
-        self.client.setEventHandler { [weak self] event in
-            self?.handle(event)
-        }
+        bindEventHandler()
     }
 
     func connect() async {
         guard !isConnecting, !isConnected else { return }
 
+        rebuildClient(for: host)
         isConnecting = true
         latestErrorMessage = nil
         canReconnectWithPassword = false
         didDisconnectUnexpectedly = false
         isDisconnectingManually = false
-        appendMessage("Connecting to \(host.username)@\(host.hostname):\(host.port)...", kind: .status)
+        appendMessage(connectionMessage(for: host), kind: .status)
 
         do {
-            try await client.connect(to: host)
+            try await client.connect()
             isConnected = true
             latestErrorMessage = nil
-            if host.usesPasswordAuthentication {
+            if host.usesPasswordAuthentication, isDirectSSHSession {
                 isShowingKeySetupPrompt = credentials.shouldOfferKeySetup(for: host.remoteIdentity)
             }
         } catch let error as SSHClientError {
             handleConnectError(error)
+        } catch let error as RelaySessionError {
+            latestErrorMessage = error.localizedDescription
+            appendMessage(error.localizedDescription, kind: .error)
         } catch {
             let description = describe(error)
             latestErrorMessage = description
             appendMessage(description, kind: .error)
-            if !host.usesPasswordAuthentication && RelayPreferences.shared.allowsPasswordFallback {
+            if isDirectSSHSession,
+               !host.usesPasswordAuthentication,
+               RelayPreferences.shared.allowsPasswordFallback {
                 canReconnectWithPassword = true
             }
         }
@@ -71,7 +77,9 @@ final class TerminalSessionViewModel {
     }
 
     func enableSavedKey() async {
-        guard host.usesPasswordAuthentication, !isProvisioningSavedKey else { return }
+        guard let directSSHClient,
+              host.usesPasswordAuthentication,
+              !isProvisioningSavedKey else { return }
 
         isShowingKeySetupPrompt = false
         isProvisioningSavedKey = true
@@ -79,7 +87,7 @@ final class TerminalSessionViewModel {
         appendMessage("Generating and installing a saved SSH key...", kind: .status)
 
         do {
-            try await client.provisionSavedKey(for: host)
+            try await directSSHClient.provisionSavedKey()
             host.authentication = .automatic
             canReconnectWithPassword = false
             latestErrorMessage = nil
@@ -94,12 +102,13 @@ final class TerminalSessionViewModel {
     }
 
     func dismissSavedKeyPrompt() {
+        guard isDirectSSHSession else { return }
         isShowingKeySetupPrompt = false
         credentials.dismissKeySetupPrompt(for: host.remoteIdentity)
     }
 
     func trustPendingHostKey() async {
-        guard let pendingHostTrust else { return }
+        guard isDirectSSHSession, let pendingHostTrust else { return }
 
         credentials.saveTrustedHostKey(
             TrustedSSHHostKey(
@@ -115,11 +124,11 @@ final class TerminalSessionViewModel {
         self.pendingHostTrust = nil
         didDisconnectUnexpectedly = false
         appendMessage("Trusted SSH host fingerprint \(pendingHostTrust.fingerprint).", kind: .status)
-        await connect()
+        await reconnect(with: host)
     }
 
     func rejectPendingHostKey() {
-        guard pendingHostTrust != nil else { return }
+        guard isDirectSSHSession, pendingHostTrust != nil else { return }
 
         latestErrorMessage = nil
         isShowingHostTrustPrompt = false
@@ -130,6 +139,7 @@ final class TerminalSessionViewModel {
     func reconnect(with host: Host) async {
         await disconnect()
         self.host = host
+        rebuildClient(for: host)
         pendingHostTrust = nil
         isShowingHostTrustPrompt = false
         latestErrorMessage = nil
@@ -197,6 +207,12 @@ final class TerminalSessionViewModel {
     }
 
     private func handleConnectError(_ error: SSHClientError) {
+        guard isDirectSSHSession else {
+            latestErrorMessage = error.localizedDescription
+            appendMessage(error.localizedDescription, kind: .error)
+            return
+        }
+
         latestErrorMessage = error.localizedDescription
         appendMessage(error.localizedDescription, kind: .error)
 
@@ -209,6 +225,29 @@ final class TerminalSessionViewModel {
                 canReconnectWithPassword = true
             }
         }
+    }
+
+    private var directSSHClient: DirectSSHSessionClient? {
+        client as? DirectSSHSessionClient
+    }
+
+    private func rebuildClient(for host: Host) {
+        client = TerminalSessionClientFactory.makeClient(for: host)
+        bindEventHandler()
+    }
+
+    private func bindEventHandler() {
+        client.setEventHandler { [weak self] event in
+            self?.handle(event)
+        }
+    }
+
+    private func connectionMessage(for host: Host) -> String {
+        if host.usesRelayTransport {
+            return "Connecting to \(host.name) through Relay..."
+        }
+
+        return "Connecting to \(host.username)@\(host.hostname):\(host.port)..."
     }
 
     private func describe(_ error: Error) -> String {

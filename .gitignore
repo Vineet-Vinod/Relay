@@ -1,3 +1,10 @@
 ### Xcode ###
 ## User settings
 xcuserdata/
+
+### Relay Backend ###
+Server/data/
+Server/certs/
+Server/server
+Agent/agent
+.DS_Store

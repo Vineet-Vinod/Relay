@@ -14,15 +14,25 @@ struct ContentView: View {
         case settings
     }
 
-    private let provider: any MeshProvider
+    @AppStorage(RelayDefaultsKey.meshProviderKind) private var providerKindRawValue = MeshProviderKind.tailscale.rawValue
+    private let injectedProvider: (any MeshProvider)?
     @State private var selectedTab: Tab = .devices
 
     init() {
-        self.provider = ManualDeviceProvider()
+        self.injectedProvider = nil
     }
 
     init(provider: any MeshProvider) {
-        self.provider = provider
+        self.injectedProvider = provider
+    }
+
+    private var provider: any MeshProvider {
+        if let injectedProvider {
+            return injectedProvider
+        }
+
+        let kind = MeshProviderKind(rawValue: providerKindRawValue) ?? .tailscale
+        return MeshProviderFactory.makeProvider(for: kind)
     }
 
     var body: some View {

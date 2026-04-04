@@ -83,7 +83,7 @@ struct TerminalView: View {
                 TerminalRecoveryOverlay(
                     palette: palette,
                     title: "Disconnected",
-                    message: "The SSH session is closed.",
+                    message: "The session is closed.",
                     primaryActionTitle: "Reconnect",
                     primaryActionTint: palette.accentColor,
                     primaryAction: reconnectTerminal,
@@ -105,8 +105,10 @@ struct TerminalView: View {
                             }
                         }
 
-                        Button("Talk to Codex") {
-                            isShowingVoiceWorkspacePicker = true
+                        if viewModel.supportsVoiceSession {
+                            Button("Talk to Codex") {
+                                isShowingVoiceWorkspacePicker = true
+                            }
                         }
 
                         if viewModel.isConnecting || viewModel.isConnected {
@@ -176,26 +178,28 @@ struct TerminalView: View {
             }
         }
         .sheet(isPresented: $isShowingVoiceWorkspacePicker) {
-            VoiceWorkspacePickerView(
-                host: viewModel.host,
-                initialWorkspacePath: viewModel.host.defaultCodexPath ?? "",
-                supportsSavingDefault: false,
-                onCancel: {
-                    isShowingVoiceWorkspacePicker = false
-                },
-                onStart: { workspacePath, _ in
-                    var host = viewModel.host
-                    let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
-                    host.defaultCodexPath = trimmedWorkspacePath
-                    isShowingVoiceWorkspacePicker = false
-                    activeVoiceSession = VoiceSessionConfiguration(
-                        host: host,
-                        workspacePath: trimmedWorkspacePath
-                    )
-                }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+            if viewModel.supportsVoiceSession {
+                VoiceWorkspacePickerView(
+                    host: viewModel.host,
+                    initialWorkspacePath: viewModel.host.defaultCodexPath ?? "",
+                    supportsSavingDefault: false,
+                    onCancel: {
+                        isShowingVoiceWorkspacePicker = false
+                    },
+                    onStart: { workspacePath, _ in
+                        var host = viewModel.host
+                        let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+                        host.defaultCodexPath = trimmedWorkspacePath
+                        isShowingVoiceWorkspacePicker = false
+                        activeVoiceSession = VoiceSessionConfiguration(
+                            host: host,
+                            workspacePath: trimmedWorkspacePath
+                        )
+                    }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
         .fullScreenCover(item: $activeVoiceSession) { configuration in
             VoiceSessionView(configuration: configuration)

@@ -7,6 +7,11 @@
 
 import Foundation
 
+enum PeerConnectionKind: String, Hashable, Codable, Sendable {
+    case ssh
+    case relay
+}
+
 struct PeerDevice: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let providerIdentifier: String
@@ -18,6 +23,8 @@ struct PeerDevice: Identifiable, Hashable, Codable, Sendable {
     let isOnline: Bool
     let operatingSystem: String
     let ownerName: String
+    let connectionKind: PeerConnectionKind
+    let supportsVoiceSession: Bool
 
     init(
         id: UUID = UUID(),
@@ -29,7 +36,9 @@ struct PeerDevice: Identifiable, Hashable, Codable, Sendable {
         sshUsername: String,
         isOnline: Bool,
         operatingSystem: String,
-        ownerName: String
+        ownerName: String,
+        connectionKind: PeerConnectionKind = .ssh,
+        supportsVoiceSession: Bool = true
     ) {
         self.id = id
         self.providerIdentifier = providerIdentifier
@@ -41,6 +50,8 @@ struct PeerDevice: Identifiable, Hashable, Codable, Sendable {
         self.isOnline = isOnline
         self.operatingSystem = operatingSystem
         self.ownerName = ownerName
+        self.connectionKind = connectionKind
+        self.supportsVoiceSession = supportsVoiceSession
     }
 }
 

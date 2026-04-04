@@ -9,4 +9,5 @@ import Foundation
 
 enum RelayServices {
     nonisolated(unsafe) static let sshCredentials = SSHCredentialStore()
+    nonisolated(unsafe) static let relayConfiguration = RelayConfigurationStore.shared
 }

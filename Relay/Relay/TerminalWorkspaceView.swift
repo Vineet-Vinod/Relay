@@ -458,7 +458,7 @@ private struct TerminalNewTabPickerView: View {
                                     .font(.headline)
                                     .foregroundStyle(palette.textColor)
 
-                                Text(peer.networkAddress)
+                                Text(peer.displayAddress)
                                     .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
                                     .foregroundStyle(palette.mutedColor)
                                     .lineLimit(1)
@@ -539,7 +539,7 @@ private struct TerminalNewTabPickerView: View {
 
         do {
             let host = try await provider.endpoint(for: peer)
-            if shouldConnectDirectly(to: host) {
+            if host.usesRelayTransport || shouldConnectDirectly(to: host) {
                 dismiss()
                 DispatchQueue.main.async {
                     onOpenHost(host)

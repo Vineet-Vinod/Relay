@@ -67,8 +67,8 @@ enum MeshProviderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .endpointUnavailable(let name):
-            return "Relay couldn't resolve an SSH endpoint for \(name)."
+        case .endpointUnavailable(let message):
+            return message
         }
     }
 }
@@ -99,7 +99,7 @@ struct SavedDevice: Identifiable, Hashable, Codable, Sendable {
 }
 
 struct ManualDeviceProvider: MeshProvider {
-    let displayName = "Saved Devices"
+    let displayName = "Tailscale"
     let supportsManualHostManagement = true
 
     private let store: SavedDeviceStore
@@ -112,8 +112,8 @@ struct ManualDeviceProvider: MeshProvider {
     func currentSnapshot() async -> MeshProviderSnapshot {
         MeshProviderSnapshot(
             status: .ready(
-                title: "Saved Devices",
-                detail: "Add devices by IP address and Relay will check which ones are reachable over SSH."
+                title: "Tailscale Hosts",
+                detail: "Add Tailscale hostnames or IP addresses and Relay will connect over direct SSH."
             )
         )
     }
@@ -219,14 +219,16 @@ private extension SavedDevice {
     func peerDevice(isOnline: Bool) -> PeerDevice {
         PeerDevice(
             id: id,
-            providerIdentifier: id.uuidString,
+            providerIdentifier: MeshProviderKind.tailscale.rawValue,
             name: name,
             networkAddress: hostname,
             port: port,
             sshUsername: username,
             isOnline: isOnline,
             operatingSystem: "Direct SSH",
-            ownerName: "Saved Device"
+            ownerName: "Saved Device",
+            connectionKind: .ssh,
+            supportsVoiceSession: true
         )
     }
 }
@@ -234,6 +236,26 @@ private extension SavedDevice {
 extension String {
     var isIPAddress: Bool {
         IPv4Address(self) != nil || IPv6Address(self) != nil
+    }
+
+    var isValidRelayHost: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+
+        if trimmed.isIPAddress {
+            return true
+        }
+
+        guard !trimmed.hasPrefix("."),
+              !trimmed.hasSuffix("."),
+              !trimmed.contains("..") else {
+            return false
+        }
+
+        let allowedCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.")
+        return trimmed.rangeOfCharacter(from: allowedCharacters.inverted) == nil
     }
 }
 
