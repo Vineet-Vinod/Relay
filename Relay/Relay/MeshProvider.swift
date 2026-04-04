@@ -9,7 +9,6 @@ import Foundation
 
 @MainActor
 protocol MeshProvider {
-    var mode: MeshProviderMode { get }
     var displayName: String { get }
     var supportsManualHostManagement: Bool { get }
 
@@ -18,31 +17,6 @@ protocol MeshProvider {
     func endpoint(for peer: PeerDevice) async throws -> Host
     func saveHost(_ host: SavedTailnetHost) async throws
     func deletePeer(_ peer: PeerDevice) async throws
-}
-
-enum MeshProviderMode: String, CaseIterable, Identifiable {
-    case mock
-    case tailscale
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .mock:
-            return "Mock Network"
-        case .tailscale:
-            return "Tailscale"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .mock:
-            return "Built-in demo devices for local development."
-        case .tailscale:
-            return "Use hosts that are reachable over the Tailscale app already running on this device."
-        }
-    }
 }
 
 struct MeshProviderSnapshot: Equatable {
@@ -120,47 +94,7 @@ struct SavedTailnetHost: Identifiable, Hashable, Codable {
     }
 }
 
-struct MockMeshProvider: MeshProvider {
-    let mode: MeshProviderMode = .mock
-    let displayName = "Mock Network"
-    let supportsManualHostManagement = false
-
-    func currentSnapshot() async -> MeshProviderSnapshot {
-        MeshProviderSnapshot(
-            status: .ready(
-                title: "Relay Preview Network",
-                detail: "Built-in sample devices for local development and UI previews."
-            )
-        )
-    }
-
-    func fetchPeers() async throws -> [PeerDevice] {
-        try await Task.sleep(for: .milliseconds(500))
-        return AppEnvironment.mockPeers
-    }
-
-    func endpoint(for peer: PeerDevice) async throws -> Host {
-        Host(
-            id: peer.id,
-            name: peer.name,
-            hostname: peer.meshHostname ?? peer.networkAddress,
-            port: 22,
-            username: peer.sshUsername,
-            transportMode: .mock
-        )
-    }
-
-    func saveHost(_ host: SavedTailnetHost) async throws {
-        _ = host
-    }
-
-    func deletePeer(_ peer: PeerDevice) async throws {
-        _ = peer
-    }
-}
-
 struct TailscaleMeshProvider: MeshProvider {
-    let mode: MeshProviderMode = .tailscale
     let displayName = "Tailscale"
     let supportsManualHostManagement = true
 
@@ -195,8 +129,7 @@ struct TailscaleMeshProvider: MeshProvider {
             name: savedHost.name,
             hostname: savedHost.hostname,
             port: savedHost.port,
-            username: savedHost.username,
-            transportMode: .real
+            username: savedHost.username
         )
     }
 
@@ -206,17 +139,6 @@ struct TailscaleMeshProvider: MeshProvider {
 
     func deletePeer(_ peer: PeerDevice) async throws {
         await store.remove(id: peer.id)
-    }
-}
-
-enum MeshProviderFactory {
-    static func makeProvider(mode: MeshProviderMode) -> any MeshProvider {
-        switch mode {
-        case .mock:
-            return MockMeshProvider()
-        case .tailscale:
-            return TailscaleMeshProvider()
-        }
     }
 }
 

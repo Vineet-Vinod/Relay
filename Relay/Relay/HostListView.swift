@@ -183,11 +183,7 @@ struct HostListView: View {
     }
 
     private var emptyStateMessage: String {
-        if provider.mode == .tailscale {
-            return "No tailnet hosts are saved yet. Add a host using its Tailscale IP or MagicDNS hostname, then connect over your active tailnet."
-        }
-
-        return "Relay didn't find any devices in the selected network that it can use for SSH."
+        "No tailnet hosts are saved yet. Add a host using its Tailscale IP or MagicDNS hostname, then connect over your active tailnet."
     }
 
     private func peerRow(for peer: PeerDevice) -> some View {
@@ -680,7 +676,6 @@ struct SSHLoginView: View {
             hostname: host.hostname,
             port: host.port,
             username: trimmedUsername,
-            transportMode: host.transportMode,
             authentication: .password(password)
         )
         focusedField = nil
@@ -698,6 +693,6 @@ private enum SSHLoginField: Hashable {
 
 #Preview {
     NavigationStack {
-        HostListView(provider: MockMeshProvider())
+        HostListView(provider: TailscaleMeshProvider())
     }
 }

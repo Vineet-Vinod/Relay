@@ -13,7 +13,6 @@ struct Host: Identifiable, Hashable, Codable {
     var hostname: String
     var port: Int
     var username: String
-    var transportMode: SSHTransportMode
     var authentication: SSHAuthenticationMode
 
     init(
@@ -22,7 +21,6 @@ struct Host: Identifiable, Hashable, Codable {
         hostname: String,
         port: Int = 22,
         username: String,
-        transportMode: SSHTransportMode = .real,
         authentication: SSHAuthenticationMode = .automatic
     ) {
         self.id = id
@@ -30,7 +28,6 @@ struct Host: Identifiable, Hashable, Codable {
         self.hostname = hostname
         self.port = port
         self.username = username
-        self.transportMode = transportMode
         self.authentication = authentication
     }
 }
@@ -38,7 +35,6 @@ struct Host: Identifiable, Hashable, Codable {
 extension Host {
     init(
         peer: PeerDevice,
-        transportMode: SSHTransportMode = .real,
         authentication: SSHAuthenticationMode = .automatic,
         port: Int = 22
     ) {
@@ -47,7 +43,6 @@ extension Host {
             hostname: peer.meshHostname ?? peer.networkAddress,
             port: port,
             username: peer.sshUsername,
-            transportMode: transportMode,
             authentication: authentication
         )
     }

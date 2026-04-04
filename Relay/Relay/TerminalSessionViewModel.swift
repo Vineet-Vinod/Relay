@@ -29,7 +29,7 @@ final class TerminalSessionViewModel {
 
     init(host: Host, client: SSHClient? = nil, credentials: SSHCredentialStore = RelayServices.sshCredentials) {
         self.host = host
-        self.client = client ?? SSHClientFactory.makeClient(for: host)
+        self.client = client ?? SSHClientFactory.makeClient()
         self.credentials = credentials
         self.client.setEventHandler { [weak self] event in
             self?.handle(event)
@@ -48,9 +48,6 @@ final class TerminalSessionViewModel {
             isConnected = true
             if host.usesPasswordAuthentication {
                 isShowingKeySetupPrompt = credentials.shouldOfferKeySetup(for: host.remoteIdentity)
-            }
-            if host.transportMode == .mock {
-                appendMessage("Connected to mock shell.", kind: .status)
             }
         } catch let error as SSHClientError {
             handleConnectError(error)
