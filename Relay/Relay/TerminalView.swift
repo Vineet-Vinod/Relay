@@ -60,10 +60,10 @@ struct TerminalView: View {
                     title: recoveryTitle,
                     message: latestErrorMessage,
                     primaryActionTitle: viewModel.isConnected ? "Dismiss" : "Reconnect",
-                    primaryActionTint: viewModel.isConnected ? palette.textColor : palette.greenColor,
+                    primaryActionTint: viewModel.isConnected ? palette.textColor : palette.accentColor,
                     primaryAction: handlePrimaryRecoveryAction,
                     secondaryActionTitle: viewModel.canReconnectWithPassword ? "Use Password" : nil,
-                    secondaryActionTint: palette.blueColor,
+                    secondaryActionTint: palette.textColor,
                     secondaryAction: viewModel.canReconnectWithPassword ? { isShowingPasswordSheet = true } : nil
                 )
                 .padding(.horizontal, RelayTheme.Spacing.content)
@@ -74,7 +74,7 @@ struct TerminalView: View {
                     title: "Disconnected",
                     message: "The SSH session is closed.",
                     primaryActionTitle: "Reconnect",
-                    primaryActionTint: palette.greenColor,
+                    primaryActionTint: palette.accentColor,
                     primaryAction: reconnectTerminal,
                     secondaryActionTitle: nil,
                     secondaryActionTint: nil,
@@ -420,9 +420,9 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
     func applyPalette(_ palette: RelayTerminalPalette) {
         nativeBackgroundColor = palette.background
         nativeForegroundColor = palette.text
-        caretColor = palette.green
+        caretColor = palette.accent
         backgroundColor = palette.background
-        tintColor = palette.green
+        tintColor = palette.accent
         setNeedsDisplay()
     }
 

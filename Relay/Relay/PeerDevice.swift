@@ -7,12 +7,13 @@
 
 import Foundation
 
-struct PeerDevice: Identifiable, Hashable, Codable {
+struct PeerDevice: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let providerIdentifier: String
     let name: String
     let networkAddress: String
     let meshHostname: String?
+    let port: Int
     let sshUsername: String
     let isOnline: Bool
     let operatingSystem: String
@@ -24,6 +25,7 @@ struct PeerDevice: Identifiable, Hashable, Codable {
         name: String,
         networkAddress: String,
         meshHostname: String? = nil,
+        port: Int = 22,
         sshUsername: String,
         isOnline: Bool,
         operatingSystem: String,
@@ -34,6 +36,7 @@ struct PeerDevice: Identifiable, Hashable, Codable {
         self.name = name
         self.networkAddress = networkAddress
         self.meshHostname = meshHostname
+        self.port = port
         self.sshUsername = sshUsername
         self.isOnline = isOnline
         self.operatingSystem = operatingSystem

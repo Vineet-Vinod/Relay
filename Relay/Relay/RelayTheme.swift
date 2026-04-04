@@ -43,38 +43,38 @@ struct RelayTerminalPalette {
     let text: UIColor
     let muted: UIColor
     let subtle: UIColor
-    let green: UIColor
-    let blue: UIColor
-    let red: UIColor
-    let amber: UIColor
+    let accent: UIColor
+    let success: UIColor
+    let danger: UIColor
+    let warning: UIColor
 
     static func palette(for colorScheme: ColorScheme) -> RelayTerminalPalette {
         if colorScheme == .dark {
             return RelayTerminalPalette(
-                background: UIColor(red: 0.051, green: 0.078, blue: 0.063, alpha: 1.0),
-                surface: UIColor(red: 0.078, green: 0.110, blue: 0.090, alpha: 1.0),
-                raised: UIColor(red: 0.106, green: 0.149, blue: 0.122, alpha: 1.0),
-                text: UIColor(red: 0.902, green: 0.941, blue: 0.914, alpha: 1.0),
-                muted: UIColor(red: 0.627, green: 0.682, blue: 0.647, alpha: 1.0),
-                subtle: UIColor(red: 0.204, green: 0.251, blue: 0.224, alpha: 1.0),
-                green: UIColor(red: 0.188, green: 0.820, blue: 0.345, alpha: 1.0),
-                blue: UIColor(red: 0.392, green: 0.824, blue: 1.000, alpha: 1.0),
-                red: UIColor(red: 1.000, green: 0.271, blue: 0.227, alpha: 1.0),
-                amber: UIColor(red: 1.000, green: 0.839, blue: 0.039, alpha: 1.0)
+                background: UIColor(red: 0.051, green: 0.059, blue: 0.082, alpha: 1.0),
+                surface: UIColor(red: 0.082, green: 0.094, blue: 0.122, alpha: 1.0),
+                raised: UIColor(red: 0.116, green: 0.133, blue: 0.169, alpha: 1.0),
+                text: UIColor(red: 0.905, green: 0.922, blue: 0.961, alpha: 1.0),
+                muted: UIColor(red: 0.620, green: 0.667, blue: 0.761, alpha: 1.0),
+                subtle: UIColor(red: 0.216, green: 0.243, blue: 0.314, alpha: 1.0),
+                accent: UIColor(red: 0.420, green: 0.702, blue: 1.000, alpha: 1.0),
+                success: UIColor(red: 0.188, green: 0.820, blue: 0.345, alpha: 1.0),
+                danger: UIColor(red: 1.000, green: 0.271, blue: 0.227, alpha: 1.0),
+                warning: UIColor(red: 1.000, green: 0.839, blue: 0.039, alpha: 1.0)
             )
         }
 
         return RelayTerminalPalette(
-            background: UIColor(red: 0.949, green: 0.965, blue: 0.953, alpha: 1.0),
-            surface: UIColor(red: 0.902, green: 0.929, blue: 0.910, alpha: 1.0),
-            raised: UIColor(red: 0.981, green: 0.988, blue: 0.982, alpha: 1.0),
-            text: UIColor(red: 0.082, green: 0.118, blue: 0.098, alpha: 1.0),
-            muted: UIColor(red: 0.314, green: 0.380, blue: 0.341, alpha: 1.0),
-            subtle: UIColor(red: 0.725, green: 0.776, blue: 0.741, alpha: 1.0),
-            green: UIColor(red: 0.188, green: 0.820, blue: 0.345, alpha: 1.0),
-            blue: UIColor(red: 0.208, green: 0.502, blue: 0.969, alpha: 1.0),
-            red: UIColor(red: 0.843, green: 0.231, blue: 0.184, alpha: 1.0),
-            amber: UIColor(red: 0.769, green: 0.569, blue: 0.000, alpha: 1.0)
+            background: UIColor(red: 0.953, green: 0.957, blue: 0.973, alpha: 1.0),
+            surface: UIColor(red: 0.914, green: 0.922, blue: 0.949, alpha: 1.0),
+            raised: UIColor(red: 0.982, green: 0.985, blue: 0.992, alpha: 1.0),
+            text: UIColor(red: 0.094, green: 0.110, blue: 0.157, alpha: 1.0),
+            muted: UIColor(red: 0.365, green: 0.404, blue: 0.490, alpha: 1.0),
+            subtle: UIColor(red: 0.780, green: 0.804, blue: 0.867, alpha: 1.0),
+            accent: UIColor(red: 0.208, green: 0.502, blue: 0.969, alpha: 1.0),
+            success: UIColor(red: 0.188, green: 0.820, blue: 0.345, alpha: 1.0),
+            danger: UIColor(red: 0.843, green: 0.231, blue: 0.184, alpha: 1.0),
+            warning: UIColor(red: 0.769, green: 0.569, blue: 0.000, alpha: 1.0)
         )
     }
 
@@ -88,10 +88,10 @@ struct RelayTerminalPalette {
     var textColor: Color { Color(uiColor: text) }
     var mutedColor: Color { Color(uiColor: muted) }
     var subtleColor: Color { Color(uiColor: subtle) }
-    var greenColor: Color { Color(uiColor: green) }
-    var blueColor: Color { Color(uiColor: blue) }
-    var redColor: Color { Color(uiColor: red) }
-    var amberColor: Color { Color(uiColor: amber) }
+    var accentColor: Color { Color(uiColor: accent) }
+    var successColor: Color { Color(uiColor: success) }
+    var dangerColor: Color { Color(uiColor: danger) }
+    var warningColor: Color { Color(uiColor: warning) }
 }
 
 extension View {
@@ -155,7 +155,7 @@ extension View {
             .overlay(
                 RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous)
                     .stroke(
-                        isFocused ? palette.greenColor.opacity(0.9) : palette.subtleColor.opacity(0.8),
+                        isFocused ? palette.accentColor.opacity(0.9) : palette.subtleColor.opacity(0.8),
                         lineWidth: isFocused ? 1.5 : 1
                     )
             )

@@ -143,9 +143,9 @@ struct HostListView: View {
             if snapshot.status.isReadyForPeers {
                 HStack(spacing: RelayTheme.Spacing.tight) {
                     statusChip(
-                        title: "\(peers.count) available",
+                        title: "\(onlinePeerCount) available",
                         systemImage: "desktopcomputer",
-                        tint: peers.isEmpty ? .secondary : RelayTheme.success
+                        tint: onlinePeerCount == 0 ? .secondary : RelayTheme.success
                     )
 
                     if provider.supportsManualHostManagement {
@@ -201,6 +201,14 @@ struct HostListView: View {
 
     private var emptyStateMessage: String {
         "No tailnet hosts are saved yet. Add a host using its Tailscale IP or MagicDNS hostname, then connect over your active tailnet."
+    }
+
+    private var onlinePeerCount: Int {
+        peers.reduce(into: 0) { count, peer in
+            if peer.isOnline {
+                count += 1
+            }
+        }
     }
 
     private var devicesHeader: some View {
@@ -665,7 +673,7 @@ struct SSHLoginView: View {
                 VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
                     Label("Password Authentication", systemImage: "lock.shield.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(palette.blueColor)
+                        .foregroundStyle(palette.accentColor)
 
                     Text(host.name)
                         .font(.title3.weight(.semibold))
@@ -681,18 +689,18 @@ struct SSHLoginView: View {
 
                 Label("This Session", systemImage: "clock")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.amberColor)
+                    .foregroundStyle(palette.warningColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background(
                         Capsule()
-                            .fill(palette.amberColor.opacity(0.14))
+                            .fill(palette.warningColor.opacity(0.14))
                     )
             }
 
             Text("ssh \(username)@\(host.hostname) -p \(host.port)")
                 .font(TerminalFontRegistry.terminalSwiftUIFont(size: 18, bold: true))
-                .foregroundStyle(palette.greenColor)
+                .foregroundStyle(palette.accentColor)
                 .textSelection(.enabled)
 
             Divider()
@@ -724,7 +732,7 @@ struct SSHLoginView: View {
                     .autocorrectionDisabled()
                     .focused($focusedField, equals: .username)
                     .foregroundStyle(palette.textColor)
-                    .tint(palette.greenColor)
+                    .tint(palette.accentColor)
                     .submitLabel(.next)
                     .onSubmit {
                         focusedField = .password
@@ -743,7 +751,7 @@ struct SSHLoginView: View {
                     .autocorrectionDisabled()
                     .focused($focusedField, equals: .password)
                     .foregroundStyle(palette.textColor)
-                    .tint(palette.greenColor)
+                    .tint(palette.accentColor)
                     .submitLabel(.go)
                     .onSubmit {
                         submit()
@@ -766,8 +774,8 @@ struct SSHLoginView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: RelayTheme.Spacing.tight) {
-                securityChip("Not Stored", tint: palette.greenColor)
-                securityChip("Editable Username", tint: palette.blueColor)
+                securityChip("Not Stored", tint: palette.accentColor)
+                securityChip("Editable Username", tint: palette.mutedColor)
             }
         }
         .relayTerminalPanel(palette)
@@ -779,7 +787,7 @@ struct SSHLoginView: View {
                 submit()
             }
             .buttonStyle(.borderedProminent)
-            .tint(palette.greenColor)
+            .tint(palette.accentColor)
             .disabled(!canSubmit)
 
             Text("Relay will use this password once to establish the SSH session.")

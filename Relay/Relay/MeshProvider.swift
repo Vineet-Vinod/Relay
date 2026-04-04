@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Network
 
 @MainActor
 protocol MeshProvider {
@@ -72,7 +73,7 @@ enum MeshProviderError: LocalizedError {
     }
 }
 
-struct SavedTailnetHost: Identifiable, Hashable, Codable {
+struct SavedTailnetHost: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     var name: String
     var hostname: String
@@ -99,6 +100,7 @@ struct TailscaleMeshProvider: MeshProvider {
     let supportsManualHostManagement = true
 
     private let store: TailnetHostStore
+    private let reachability = HostReachabilityService.shared
 
     init(store: TailnetHostStore = .shared) {
         self.store = store
@@ -115,7 +117,11 @@ struct TailscaleMeshProvider: MeshProvider {
 
     func fetchPeers() async throws -> [PeerDevice] {
         let hosts = await store.hosts()
-        return hosts.map(\.peerDevice)
+        let reachabilityByHostID = await reachability.onlineStatusByHostID(for: hosts)
+
+        return hosts.map { host in
+            host.peerDevice(isOnline: reachabilityByHostID[host.id] ?? false)
+        }
     }
 
     func endpoint(for peer: PeerDevice) async throws -> Host {
@@ -188,15 +194,16 @@ actor TailnetHostStore {
 }
 
 private extension SavedTailnetHost {
-    var peerDevice: PeerDevice {
+    func peerDevice(isOnline: Bool) -> PeerDevice {
         PeerDevice(
             id: id,
             providerIdentifier: id.uuidString,
             name: name,
             networkAddress: hostname,
             meshHostname: hostname.looksLikeIPAddress ? nil : hostname,
+            port: port,
             sshUsername: username,
-            isOnline: true,
+            isOnline: isOnline,
             operatingSystem: "Tailnet",
             ownerName: "Saved Host"
         )
@@ -206,5 +213,74 @@ private extension SavedTailnetHost {
 private extension String {
     var looksLikeIPAddress: Bool {
         allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
+    }
+}
+
+actor HostReachabilityService {
+    static let shared = HostReachabilityService()
+
+    func onlineStatusByHostID(for hosts: [SavedTailnetHost]) async -> [UUID: Bool] {
+        await withTaskGroup(of: (UUID, Bool).self, returning: [UUID: Bool].self) { group in
+            for host in hosts {
+                group.addTask {
+                    let isOnline = await Self.isReachable(hostname: host.hostname, port: host.port)
+                    return (host.id, isOnline)
+                }
+            }
+
+            var results: [UUID: Bool] = [:]
+            for await (hostID, isOnline) in group {
+                results[hostID] = isOnline
+            }
+            return results
+        }
+    }
+
+    private static func isReachable(hostname: String, port: Int) async -> Bool {
+        guard let networkPort = NWEndpoint.Port(rawValue: UInt16(port)) else {
+            return false
+        }
+
+        return await withCheckedContinuation { continuation in
+            let probeState = ReachabilityProbeState()
+            let queue = DispatchQueue(label: "relay.host-reachability.\(UUID().uuidString)")
+            let connection = NWConnection(host: NWEndpoint.Host(hostname), port: networkPort, using: .tcp)
+
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    probeState.finish(true, connection: connection, continuation: continuation)
+                case .failed, .cancelled:
+                    probeState.finish(false, connection: connection, continuation: continuation)
+                default:
+                    break
+                }
+            }
+
+            queue.asyncAfter(deadline: .now() + 2) {
+                probeState.finish(false, connection: connection, continuation: continuation)
+            }
+
+            connection.start(queue: queue)
+        }
+    }
+}
+
+private final class ReachabilityProbeState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func finish(
+        _ isOnline: Bool,
+        connection: NWConnection,
+        continuation: CheckedContinuation<Bool, Never>
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !completed else { return }
+        completed = true
+        connection.cancel()
+        continuation.resume(returning: isOnline)
     }
 }

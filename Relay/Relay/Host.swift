@@ -35,13 +35,12 @@ struct Host: Identifiable, Hashable, Codable {
 extension Host {
     init(
         peer: PeerDevice,
-        authentication: SSHAuthenticationMode = .automatic,
-        port: Int = 22
+        authentication: SSHAuthenticationMode = .automatic
     ) {
         self.init(
             name: peer.name,
             hostname: peer.meshHostname ?? peer.networkAddress,
-            port: port,
+            port: peer.port,
             username: peer.sshUsername,
             authentication: authentication
         )
