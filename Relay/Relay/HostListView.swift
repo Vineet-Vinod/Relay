@@ -10,6 +10,8 @@ import SwiftUI
 struct HostListView: View {
     let provider: any MeshProvider
 
+    @Environment(VoiceCallManager.self) private var voiceCallManager
+
     @State private var snapshot: MeshProviderSnapshot = .checking
     @State private var peers: [PeerDevice] = []
     @State private var isLoading = false
@@ -23,7 +25,6 @@ struct HostListView: View {
     @State private var pendingLoginSavedDevice: SavedDevice?
     @State private var destinationHost: Host?
     @State private var voiceWorkspaceDraft: VoiceWorkspaceDraft?
-    @State private var activeVoiceSession: VoiceSessionConfiguration?
 
     var body: some View {
         List {
@@ -91,9 +92,6 @@ struct HostListView: View {
         }
         .navigationDestination(item: $destinationHost) { host in
             TerminalWorkspaceView(provider: provider, initialHost: host)
-        }
-        .fullScreenCover(item: $activeVoiceSession) { configuration in
-            VoiceSessionView(configuration: configuration)
         }
         .navigationDestination(item: $detailPeer) { peer in
             DeviceDetailView(
@@ -487,9 +485,11 @@ struct HostListView: View {
 
         var host = draft.host
         host.defaultCodexPath = trimmedWorkspacePath
-        activeVoiceSession = VoiceSessionConfiguration(
-            host: host,
-            workspacePath: trimmedWorkspacePath
+        voiceCallManager.startCall(
+            configuration: VoiceSessionConfiguration(
+                host: host,
+                workspacePath: trimmedWorkspacePath
+            )
         )
     }
 }
@@ -1010,4 +1010,5 @@ private struct VoiceWorkspaceDraft: Identifiable {
     NavigationStack {
         HostListView(provider: ManualDeviceProvider())
     }
+    .environment(VoiceCallManager())
 }

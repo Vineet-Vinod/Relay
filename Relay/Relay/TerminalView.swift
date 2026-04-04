@@ -11,6 +11,7 @@ import UIKit
 
 struct TerminalView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(VoiceCallManager.self) private var voiceCallManager
 
     @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = RelayTerminalFontSizePreference.defaultSize
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
@@ -23,7 +24,6 @@ struct TerminalView: View {
     @State private var isShowingPasswordSheet = false
     @State private var isShowingVoiceWorkspacePicker = false
     @State private var pendingReconnectHost: Host?
-    @State private var activeVoiceSession: VoiceSessionConfiguration?
     @State private var didAttemptConnection = false
     @State private var autoReconnectTask: Task<Void, Never>?
 
@@ -188,17 +188,16 @@ struct TerminalView: View {
                     let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
                     host.defaultCodexPath = trimmedWorkspacePath
                     isShowingVoiceWorkspacePicker = false
-                    activeVoiceSession = VoiceSessionConfiguration(
-                        host: host,
-                        workspacePath: trimmedWorkspacePath
+                    voiceCallManager.startCall(
+                        configuration: VoiceSessionConfiguration(
+                            host: host,
+                            workspacePath: trimmedWorkspacePath
+                        )
                     )
                 }
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
-        }
-        .fullScreenCover(item: $activeVoiceSession) { configuration in
-            VoiceSessionView(configuration: configuration)
         }
         .task {
             viewModel.onTerminalOutput = { bytes in

@@ -12,21 +12,19 @@ struct VoiceSessionView: View {
     private static let promptEditorMinHeight = ceil(TerminalFontRegistry.terminalFont(size: 16, bold: false).lineHeight)
     private static let promptEditorMaxHeight: CGFloat = 126
     private static let promptEditorVerticalPadding: CGFloat = 10
+    private static let collapsedPromptEditorHeight = promptEditorMinHeight
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
-    @AppStorage(RelayDefaultsKey.keepScreenAwake) private var keepsScreenAwake = true
     @AppStorage(RelayDefaultsKey.voiceSpeechRate) private var voiceSpeechRate = RelayVoicePreference.defaultSpeechRate
+
+    let onEnd: () -> Void
+    let isActive: Bool
 
     @State private var isPresentingAudioRoutes = false
     @State private var isPresentingVoiceSettings = false
-    @State private var viewModel: VoiceSessionViewModel
     @State private var isPromptFieldFocused = false
-
-    init(configuration: VoiceSessionConfiguration) {
-        _viewModel = State(initialValue: VoiceSessionViewModel(configuration: configuration))
-    }
+    let viewModel: VoiceSessionViewModel
 
     var body: some View {
         let palette = RelayTerminalPalette.palette(for: colorScheme)
@@ -70,12 +68,8 @@ struct VoiceSessionView: View {
             .presentationDragIndicator(.visible)
         }
         .task {
-            updateIdleTimer()
             viewModel.updateSpeechRate(voiceSpeechRate)
-            await viewModel.start()
-        }
-        .onChange(of: keepsScreenAwake) { _, _ in
-            updateIdleTimer()
+            await viewModel.startIfNeeded()
         }
         .onChange(of: voiceSpeechRate) { _, newValue in
             viewModel.updateSpeechRate(newValue)
@@ -87,11 +81,13 @@ struct VoiceSessionView: View {
                 viewModel.endManualEntry()
             }
         }
-        .onChange(of: viewModel.status) { _, _ in
-            updateIdleTimer()
-        }
         .onChange(of: viewModel.shouldShowPromptComposer) { _, shouldShowPromptComposer in
             if !shouldShowPromptComposer {
+                isPromptFieldFocused = false
+            }
+        }
+        .onChange(of: isActive) { _, active in
+            if !active {
                 isPromptFieldFocused = false
             }
         }
@@ -110,12 +106,6 @@ struct VoiceSessionView: View {
                 Button("Done") {
                     isPromptFieldFocused = false
                 }
-            }
-        }
-        .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
-            Task {
-                await viewModel.end()
             }
         }
     }
@@ -219,8 +209,12 @@ struct VoiceSessionView: View {
                 palette: palette
             )
             .frame(
-                minHeight: Self.promptEditorMinHeight,
-                maxHeight: Self.promptEditorMaxHeight,
+                minHeight: viewModel.draftUserSpeech.isEmpty
+                    ? Self.collapsedPromptEditorHeight
+                    : Self.promptEditorMinHeight,
+                maxHeight: viewModel.draftUserSpeech.isEmpty
+                    ? Self.collapsedPromptEditorHeight
+                    : Self.promptEditorMaxHeight,
                 alignment: .topLeading
             )
             .background(Color.clear)
@@ -297,12 +291,12 @@ struct VoiceSessionView: View {
             viewModel.toggleMute()
         } label: {
             VoicePhoneControlButton(
-                title: viewModel.isMuted ? "Unmute" : "Mute",
+                title: viewModel.isUserMutedExplicitly ? "Unmute" : "Mute",
                 subtitle: nil,
-                systemImage: viewModel.isMuted ? "mic.slash.fill" : "mic.fill",
+                systemImage: viewModel.isUserMutedExplicitly ? "mic.slash.fill" : "mic.fill",
                 palette: palette,
                 accentColor: palette.warningColor,
-                isActive: viewModel.isMuted,
+                isActive: viewModel.isUserMutedExplicitly,
                 usesSolidAccentFillWhenActive: false,
                 isDisabled: false
             )
@@ -352,7 +346,7 @@ struct VoiceSessionView: View {
 
     private func endButton(palette: RelayTerminalPalette) -> some View {
         Button {
-            dismiss()
+            onEnd()
         } label: {
             VoicePhoneControlButton(
                 title: "End",
@@ -390,11 +384,6 @@ struct VoiceSessionView: View {
 
     private func bottomTrayHeight(for availableHeight: CGFloat) -> CGFloat {
         min(max(availableHeight * 0.30, 238), 320)
-    }
-
-    private func updateIdleTimer() {
-        let shouldStayAwake = keepsScreenAwake && viewModel.status != .ended
-        UIApplication.shared.isIdleTimerDisabled = shouldStayAwake
     }
 }
 
