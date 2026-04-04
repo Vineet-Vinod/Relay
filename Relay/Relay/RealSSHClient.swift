@@ -12,8 +12,13 @@ import NIOTransportServices
 
 @MainActor
 final class RealSSHClient: SSHClient {
+    private let credentials: SSHCredentialStore
     private var session: SSHConnectionSession?
     private var eventHandler: (@MainActor @Sendable (TerminalEvent) -> Void)?
+
+    init(credentials: SSHCredentialStore = RelayServices.sshCredentials) {
+        self.credentials = credentials
+    }
 
     func setEventHandler(_ handler: (@MainActor @Sendable (TerminalEvent) -> Void)?) {
         self.eventHandler = handler
@@ -25,24 +30,65 @@ final class RealSSHClient: SSHClient {
             self.session = nil
         }
 
+        let authentication = try resolveAuthentication(for: host)
+        let emit = eventEmitter()
+
+        self.session = try await SSHConnectionSession.connect(
+            to: host,
+            authentication: authentication,
+            trustStore: credentials,
+            eventSink: emit
+        )
+
+        emit(.status(authentication.connectedMessage))
+    }
+
+    func provisionSavedKey(for host: Host) async throws {
         guard let password = host.password, !password.isEmpty else {
             throw SSHClientError.missingPassword
         }
 
-        let emit: @Sendable (TerminalEvent) -> Void = { [eventHandler] event in
-            guard let eventHandler else { return }
-            Task { @MainActor in
-                eventHandler(event)
-            }
+        let keyPair = SSHGeneratedKeyPair.generate(comment: host.savedKeyComment)
+        let installCommand = SSHAuthorizedKeysInstaller.installCommand(for: keyPair.authorizedKey)
+        let installResult = try await SSHConnectionSession.runCommand(
+            to: host,
+            authentication: .password(password),
+            trustStore: credentials,
+            command: installCommand
+        )
+
+        guard installResult.exitStatus == 0 else {
+            let stderr = installResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            let details = stderr.isEmpty ? installResult.stdout : stderr
+            throw SSHClientError.keyProvisioningFailed(
+                details.isEmpty
+                    ? "Relay could not install the public key on the remote device."
+                    : "Relay could not install the public key: \(details)"
+            )
         }
 
-        self.session = try await SSHConnectionSession.connect(to: host, password: password, eventSink: emit)
-        emit(.status("Connected."))
+        do {
+            try await SSHConnectionSession.verifyConnection(
+                to: host,
+                authentication: .privateKey(keyPair.nioPrivateKey),
+                trustStore: credentials
+            )
+        } catch let error as SSHClientError {
+            switch error {
+            case .hostKeyMismatch, .unsupportedHostKey:
+                throw error
+            default:
+                throw SSHClientError.publicKeyVerificationFailed
+            }
+        } catch {
+            throw SSHClientError.publicKeyVerificationFailed
+        }
+
+        try credentials.save(keyPair, for: host.remoteIdentity)
     }
 
-    func sendInput(_ text: String) async throws {
-        let trimmed = text.trimmingCharacters(in: .newlines)
-        guard !trimmed.isEmpty else {
+    func sendRawInput(_ bytes: [UInt8]) async throws {
+        guard !bytes.isEmpty else {
             throw SSHClientError.emptyCommand
         }
 
@@ -50,7 +96,7 @@ final class RealSSHClient: SSHClient {
             throw SSHClientError.notConnected
         }
 
-        try await session.sendInput(text + "\n")
+        try await session.sendInput(bytes)
     }
 
     func resizeTerminal(columns: Int, rows: Int) async {
@@ -63,6 +109,58 @@ final class RealSSHClient: SSHClient {
         await session.close()
         self.session = nil
     }
+
+    private func resolveAuthentication(for host: Host) throws -> SSHConnectionAuthentication {
+        switch host.authentication {
+        case .password(let password):
+            guard !password.isEmpty else {
+                throw SSHClientError.missingPassword
+            }
+
+            return .password(password)
+        case .automatic:
+            guard let privateKey = try credentials.privateKey(for: host.remoteIdentity) else {
+                throw SSHClientError.missingPrivateKey
+            }
+
+            return .privateKey(privateKey)
+        }
+    }
+
+    private func eventEmitter() -> @Sendable (TerminalEvent) -> Void {
+        { [eventHandler] event in
+            guard let eventHandler else { return }
+            Task { @MainActor in
+                eventHandler(event)
+            }
+        }
+    }
+}
+
+private enum SSHConnectionAuthentication {
+    case password(String)
+    case privateKey(NIOSSHPrivateKey)
+
+    var connectedMessage: String {
+        switch self {
+        case .password:
+            return "Connected."
+        case .privateKey:
+            return "Connected using saved SSH key."
+        }
+    }
+}
+
+private struct SSHCommandResult {
+    let stdout: String
+    let stderr: String
+    let exitStatus: Int32
+}
+
+private struct ConnectedRoot {
+    let group: NIOTSEventLoopGroup
+    let rootChannel: Channel
+    let sshHandler: SSHHandlerBox
 }
 
 private final class SSHConnectionSession {
@@ -78,12 +176,93 @@ private final class SSHConnectionSession {
 
     static func connect(
         to host: Host,
-        password: String,
+        authentication: SSHConnectionAuthentication,
+        trustStore: SSHCredentialStore,
         eventSink: @escaping @Sendable (TerminalEvent) -> Void
     ) async throws -> SSHConnectionSession {
+        let root = try await openRootConnection(to: host, authentication: authentication, trustStore: trustStore)
+
+        do {
+            let shellChannel = try await openShellChannel(
+                rootChannel: root.rootChannel,
+                sshHandler: root.sshHandler,
+                eventSink: eventSink
+            )
+            return SSHConnectionSession(group: root.group, rootChannel: root.rootChannel, shellChannel: shellChannel)
+        } catch {
+            try? await close(root: root)
+            throw error
+        }
+    }
+
+    static func runCommand(
+        to host: Host,
+        authentication: SSHConnectionAuthentication,
+        trustStore: SSHCredentialStore,
+        command: String
+    ) async throws -> SSHCommandResult {
+        let root = try await openRootConnection(to: host, authentication: authentication, trustStore: trustStore)
+
+        do {
+            let result = try await openExecChannel(
+                rootChannel: root.rootChannel,
+                sshHandler: root.sshHandler,
+                command: command
+            )
+            try? await close(root: root)
+            return result
+        } catch {
+            try? await close(root: root)
+            throw error
+        }
+    }
+
+    static func verifyConnection(
+        to host: Host,
+        authentication: SSHConnectionAuthentication,
+        trustStore: SSHCredentialStore
+    ) async throws {
+        let root = try await openRootConnection(to: host, authentication: authentication, trustStore: trustStore)
+        try await close(root: root)
+    }
+
+    func sendInput(_ bytes: [UInt8]) async throws {
+        guard self.shellChannel.isActive else {
+            throw SSHClientError.notConnected
+        }
+
+        var buffer = self.shellChannel.allocator.buffer(capacity: bytes.count)
+        buffer.writeBytes(bytes)
+        let data = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
+        try await self.shellChannel.writeAndFlush(data).get()
+    }
+
+    func resizeTerminal(columns: Int, rows: Int) async {
+        guard self.shellChannel.isActive, columns > 0, rows > 0 else { return }
+
+        let request = SSHChannelRequestEvent.WindowChangeRequest(
+            terminalCharacterWidth: columns,
+            terminalRowHeight: rows,
+            terminalPixelWidth: 0,
+            terminalPixelHeight: 0
+        )
+        try? await self.shellChannel.triggerUserOutboundEvent(request).get()
+    }
+
+    func close() async {
+        try? await self.shellChannel.close().get()
+        try? await self.rootChannel.close().get()
+        try? await self.group.shutdownGracefully()
+    }
+
+    private static func openRootConnection(
+        to host: Host,
+        authentication: SSHConnectionAuthentication,
+        trustStore: SSHCredentialStore
+    ) async throws -> ConnectedRoot {
         let group = NIOTSEventLoopGroup(loopCount: 1)
-        let authDelegate = PasswordAuthenticationDelegate(username: host.username, password: password)
-        let hostKeyDelegate = AcceptAllHostKeysDelegate()
+        let authDelegate = CredentialAuthenticationDelegate(username: host.username, authentication: authentication)
+        let hostKeyDelegate = TrustOnFirstUseHostKeysDelegate(endpoint: host.endpointIdentity, store: trustStore)
         let sshHandler = NIOSSHHandler(
             role: .client(
                 .init(
@@ -110,57 +289,28 @@ private final class SSHConnectionSession {
         do {
             let rootChannel = try await bootstrap.connect(host: host.hostname, port: host.port).get()
             try await authenticationPromise.futureResult.get()
-            let shellChannel = try await Self.openShellChannel(
-                rootChannel: rootChannel,
-                sshHandler: sshHandler,
-                eventSink: eventSink
-            )
-            return SSHConnectionSession(group: group, rootChannel: rootChannel, shellChannel: shellChannel)
+            return ConnectedRoot(group: group, rootChannel: rootChannel, sshHandler: sshHandlerBox)
         } catch {
             try? await group.shutdownGracefully()
             throw error
         }
     }
 
-    func sendInput(_ text: String) async throws {
-        guard self.shellChannel.isActive else {
-            throw SSHClientError.notConnected
-        }
-
-        var buffer = self.shellChannel.allocator.buffer(capacity: text.utf8.count)
-        buffer.writeString(text)
-        let data = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
-        try await self.shellChannel.writeAndFlush(data).get()
-    }
-
-    func resizeTerminal(columns: Int, rows: Int) async {
-        guard self.shellChannel.isActive, columns > 0, rows > 0 else { return }
-
-        let request = SSHChannelRequestEvent.WindowChangeRequest(
-            terminalCharacterWidth: columns,
-            terminalRowHeight: rows,
-            terminalPixelWidth: 0,
-            terminalPixelHeight: 0
-        )
-        try? await self.shellChannel.triggerUserOutboundEvent(request).get()
-    }
-
-    func close() async {
-        try? await self.shellChannel.close().get()
-        try? await self.rootChannel.close().get()
-        try? await self.group.shutdownGracefully()
+    private static func close(root: ConnectedRoot) async throws {
+        try await root.rootChannel.close().get()
+        try await root.group.shutdownGracefully()
     }
 
     private static func openShellChannel(
         rootChannel: Channel,
-        sshHandler: NIOSSHHandler,
+        sshHandler: SSHHandlerBox,
         eventSink: @escaping @Sendable (TerminalEvent) -> Void
     ) async throws -> Channel {
         let readyPromise = rootChannel.eventLoop.makePromise(of: Void.self)
         let childPromise = rootChannel.eventLoop.makePromise(of: Channel.self)
 
         rootChannel.eventLoop.execute {
-            sshHandler.createChannel(childPromise) { childChannel, channelType in
+            sshHandler.handler.createChannel(childPromise) { childChannel, channelType in
                 guard channelType == .session else {
                     return childChannel.eventLoop.makeFailedFuture(SSHClientError.invalidChannelType)
                 }
@@ -176,6 +326,31 @@ private final class SSHConnectionSession {
         try await readyPromise.futureResult.get()
         return childChannel
     }
+
+    private static func openExecChannel(
+        rootChannel: Channel,
+        sshHandler: SSHHandlerBox,
+        command: String
+    ) async throws -> SSHCommandResult {
+        let resultPromise = rootChannel.eventLoop.makePromise(of: SSHCommandResult.self)
+        let childPromise = rootChannel.eventLoop.makePromise(of: Channel.self)
+
+        rootChannel.eventLoop.execute {
+            sshHandler.handler.createChannel(childPromise) { childChannel, channelType in
+                guard channelType == .session else {
+                    return childChannel.eventLoop.makeFailedFuture(SSHClientError.invalidChannelType)
+                }
+
+                return childChannel.eventLoop.makeCompletedFuture {
+                    let handler = ExecCommandHandler(command: command, resultPromise: resultPromise)
+                    try childChannel.pipeline.syncOperations.addHandler(handler)
+                }
+            }
+        }
+
+        _ = try await childPromise.futureResult.get()
+        return try await resultPromise.futureResult.get()
+    }
 }
 
 private final class SSHHandlerBox: @unchecked Sendable {
@@ -186,13 +361,27 @@ private final class SSHHandlerBox: @unchecked Sendable {
     }
 }
 
-private nonisolated final class PasswordAuthenticationDelegate: NIOSSHClientUserAuthenticationDelegate {
-    private let username: String
-    private let password: String
+private nonisolated final class CredentialAuthenticationDelegate: NIOSSHClientUserAuthenticationDelegate {
+    private var authRequest: NIOSSHUserAuthenticationOffer?
+    private let requestedMethod: NIOSSHAvailableUserAuthenticationMethods
 
-    init(username: String, password: String) {
-        self.username = username
-        self.password = password
+    init(username: String, authentication: SSHConnectionAuthentication) {
+        switch authentication {
+        case .password(let password):
+            self.authRequest = NIOSSHUserAuthenticationOffer(
+                username: username,
+                serviceName: "",
+                offer: .password(.init(password: password))
+            )
+            self.requestedMethod = .password
+        case .privateKey(let privateKey):
+            self.authRequest = NIOSSHUserAuthenticationOffer(
+                username: username,
+                serviceName: "",
+                offer: .privateKey(.init(privateKey: privateKey))
+            )
+            self.requestedMethod = .publicKey
+        }
     }
 
     nonisolated
@@ -200,25 +389,64 @@ private nonisolated final class PasswordAuthenticationDelegate: NIOSSHClientUser
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
-        guard availableMethods.contains(.password) else {
-            nextChallengePromise.fail(SSHClientError.missingPassword)
+        guard let authRequest else {
+            nextChallengePromise.succeed(nil)
             return
         }
 
-        nextChallengePromise.succeed(
-            NIOSSHUserAuthenticationOffer(
-                username: self.username,
-                serviceName: "",
-                offer: .password(.init(password: self.password))
-            )
-        )
+        guard availableMethods.contains(requestedMethod) else {
+            nextChallengePromise.fail(SSHClientError.authenticationFailed)
+            return
+        }
+
+        self.authRequest = nil
+        nextChallengePromise.succeed(authRequest)
     }
 }
 
-private nonisolated final class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
+private nonisolated final class TrustOnFirstUseHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
+    private let endpoint: SSHHostEndpointIdentity
+    private let store: SSHCredentialStore
+
+    init(endpoint: SSHHostEndpointIdentity, store: SSHCredentialStore) {
+        self.endpoint = endpoint
+        self.store = store
+    }
+
     nonisolated
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
-        validationCompletePromise.succeed(())
+        do {
+            let payload = try SSHPublicKeyPayload.hostKey(hostKey)
+            let trusted = store.trustedHostKey(for: endpoint)
+
+            if let trusted {
+                guard trusted.algorithm == payload.algorithm, trusted.base64Payload == payload.base64Payload else {
+                    validationCompletePromise.fail(
+                        SSHClientError.hostKeyMismatch(
+                            expected: trusted.fingerprint,
+                            actual: payload.fingerprint
+                        )
+                    )
+                    return
+                }
+
+                validationCompletePromise.succeed(())
+                return
+            }
+
+            validationCompletePromise.fail(
+                SSHClientError.untrustedHostKey(
+                    SSHHostTrustChallenge(
+                        algorithm: payload.algorithm,
+                        base64Payload: payload.base64Payload,
+                        fingerprint: payload.fingerprint,
+                        firstSeenAt: Date()
+                    )
+                )
+            )
+        } catch {
+            validationCompletePromise.fail(error)
+        }
     }
 }
 
@@ -231,7 +459,7 @@ private nonisolated final class SSHErrorHandler: ChannelInboundHandler {
     }
 }
 
-private nonisolated final class SSHAuthenticationStateHandler: ChannelInboundHandler {
+private nonisolated final class SSHAuthenticationStateHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = Any
 
     private let authenticationPromise: EventLoopPromise<Void>
@@ -296,7 +524,7 @@ private nonisolated final class SSHAuthenticationStateHandler: ChannelInboundHan
     }
 }
 
-private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler {
+private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler, @unchecked Sendable {
     typealias InboundIn = SSHChannelData
     typealias OutboundIn = SSHChannelData
     typealias OutboundOut = SSHChannelData
@@ -310,7 +538,6 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler {
 
     private let eventSink: @Sendable (TerminalEvent) -> Void
     private let readyPromise: EventLoopPromise<Void>
-
     private var state: State = .requestingPseudoTerminal
     private var hasCompletedReady = false
     private var didEmitDisconnect = false
@@ -355,12 +582,12 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler {
             return
         }
 
-        let text = String(decoding: buffer.readableBytesView, as: UTF8.self)
-        guard !text.isEmpty else { return }
+        let bytes = Array(buffer.readableBytesView)
+        guard !bytes.isEmpty else { return }
 
         switch data.type {
         case .channel, .stdErr:
-            self.eventSink(.output(text))
+            self.eventSink(.output(bytes))
         default:
             break
         }
@@ -406,7 +633,7 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler {
             return
         }
 
-        self.eventSink(.error(self.describe(error)))
+        self.eventSink(.error(Self.describe(error)))
         context.close(promise: nil)
     }
 
@@ -438,7 +665,7 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler {
         self.readyPromise.fail(error)
 
         if let underlyingError {
-            self.eventSink(.error(self.describe(underlyingError)))
+            self.eventSink(.error(Self.describe(underlyingError)))
         }
 
         context.close(promise: nil)
@@ -460,11 +687,165 @@ private nonisolated final class InteractiveShellHandler: ChannelDuplexHandler {
     }
 
     nonisolated
-    private func describe(_ error: Error) -> String {
+    private static func describe(_ error: Error) -> String {
         if let localizedError = error as? LocalizedError, let description = localizedError.errorDescription {
             return description
         }
 
         return String(describing: error)
+    }
+}
+
+private nonisolated final class ExecCommandHandler: ChannelDuplexHandler, @unchecked Sendable {
+    typealias InboundIn = SSHChannelData
+    typealias OutboundIn = SSHChannelData
+    typealias OutboundOut = SSHChannelData
+
+    private let command: String
+    private let resultPromise: EventLoopPromise<SSHCommandResult>
+    private var stdout = [UInt8]()
+    private var stderr = [UInt8]()
+    private var exitStatus: Int32?
+    private var didAcceptRequest = false
+    private var hasCompleted = false
+
+    init(command: String, resultPromise: EventLoopPromise<SSHCommandResult>) {
+        self.command = command
+        self.resultPromise = resultPromise
+    }
+
+    nonisolated
+    func handlerAdded(context: ChannelHandlerContext) {
+        context.channel.setOption(ChannelOptions.allowRemoteHalfClosure, value: true).whenFailure { error in
+            context.fireErrorCaught(error)
+        }
+    }
+
+    nonisolated
+    func channelActive(context: ChannelHandlerContext) {
+        let request = SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true)
+        context.triggerUserOutboundEvent(request).whenFailure { error in
+            self.fail(error, context: context)
+        }
+    }
+
+    nonisolated
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let data = unwrapInboundIn(data)
+
+        guard case .byteBuffer(let buffer) = data.data else {
+            return
+        }
+
+        let bytes = Array(buffer.readableBytesView)
+        guard !bytes.isEmpty else { return }
+
+        switch data.type {
+        case .channel:
+            stdout += bytes
+        case .stdErr:
+            stderr += bytes
+        default:
+            break
+        }
+    }
+
+    nonisolated
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        switch event {
+        case is ChannelSuccessEvent:
+            didAcceptRequest = true
+        case is ChannelFailureEvent:
+            fail(SSHClientError.keyProvisioningFailed("The SSH server rejected Relay's bootstrap command."), context: context)
+        case let exitStatus as SSHChannelRequestEvent.ExitStatus:
+            self.exitStatus = Int32(exitStatus.exitStatus)
+            context.close(promise: nil)
+        case let exitSignal as SSHChannelRequestEvent.ExitSignal:
+            let signal = "Remote command terminated by signal \(exitSignal.signalName)."
+            stderr += Array(signal.utf8)
+            self.exitStatus = 1
+            context.close(promise: nil)
+        case ChannelEvent.inputClosed:
+            context.close(promise: nil)
+        default:
+            context.fireUserInboundEventTriggered(event)
+        }
+    }
+
+    nonisolated
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        fail(error, context: context)
+    }
+
+    nonisolated
+    func channelInactive(context: ChannelHandlerContext) {
+        completeIfPossible()
+    }
+
+    nonisolated
+    func handlerRemoved(context: ChannelHandlerContext) {
+        completeIfPossible()
+    }
+
+    nonisolated
+    private func completeIfPossible() {
+        guard !hasCompleted else { return }
+        hasCompleted = true
+
+        if let exitStatus {
+            resultPromise.succeed(
+                SSHCommandResult(
+                    stdout: String(decoding: stdout, as: UTF8.self),
+                    stderr: String(decoding: stderr, as: UTF8.self),
+                    exitStatus: exitStatus
+                )
+            )
+            return
+        }
+
+        if didAcceptRequest {
+            resultPromise.succeed(
+                SSHCommandResult(
+                    stdout: String(decoding: stdout, as: UTF8.self),
+                    stderr: String(decoding: stderr, as: UTF8.self),
+                    exitStatus: 0
+                )
+            )
+            return
+        }
+
+        resultPromise.fail(SSHClientError.notConnected)
+    }
+
+    nonisolated
+    private func fail(_ error: Error, context: ChannelHandlerContext) {
+        guard !hasCompleted else {
+            context.close(promise: nil)
+            return
+        }
+
+        hasCompleted = true
+        resultPromise.fail(error)
+        context.close(promise: nil)
+    }
+}
+
+private enum SSHAuthorizedKeysInstaller {
+    static func installCommand(for publicKey: String) -> String {
+        let escapedKey = shellQuoted(publicKey)
+        return """
+        umask 077
+        mkdir -p ~/.ssh
+        touch ~/.ssh/authorized_keys
+        chmod 700 ~/.ssh
+        chmod 600 ~/.ssh/authorized_keys
+        if ! grep -qxF \(escapedKey) ~/.ssh/authorized_keys; then
+          printf '%s\\n' \(escapedKey) >> ~/.ssh/authorized_keys
+        fi
+        """
+    }
+
+    private static func shellQuoted(_ string: String) -> String {
+        "'" + string.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 }

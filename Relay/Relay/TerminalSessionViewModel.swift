@@ -11,20 +11,26 @@ import Observation
 @MainActor
 @Observable
 final class TerminalSessionViewModel {
-    let host: Host
+    var host: Host
 
-    var lines: [TerminalLine] = []
-    var command = ""
+    var messages: [TerminalLine] = []
     var isConnecting = false
     var isConnected = false
+    var isShowingKeySetupPrompt = false
+    var isShowingHostTrustPrompt = false
+    var isProvisioningSavedKey = false
+    var canReconnectWithPassword = false
+    var pendingHostTrust: SSHHostTrustChallenge?
+
+    var onTerminalOutput: (@MainActor ([UInt8]) -> Void)?
 
     private let client: SSHClient
-    private var activeRemoteLineID: UUID?
-    private var terminalSize = TerminalSize(columns: 120, rows: 32)
+    private let credentials: SSHCredentialStore
 
-    init(host: Host, client: SSHClient? = nil) {
+    init(host: Host, client: SSHClient? = nil, credentials: SSHCredentialStore = RelayServices.sshCredentials) {
         self.host = host
-        self.client = client ?? SSHClientFactory.makeClient()
+        self.client = client ?? SSHClientFactory.makeClient(for: host)
+        self.credentials = credentials
         self.client.setEventHandler { [weak self] event in
             self?.handle(event)
         }
@@ -34,43 +40,101 @@ final class TerminalSessionViewModel {
         guard !isConnecting, !isConnected else { return }
 
         isConnecting = true
-        append("Connecting to \(host.username)@\(host.hostname):\(host.port)...", kind: .status)
+        canReconnectWithPassword = false
+        appendMessage("Connecting to \(host.username)@\(host.hostname):\(host.port)...", kind: .status)
 
         do {
             try await client.connect(to: host)
             isConnected = true
-            await client.resizeTerminal(columns: terminalSize.columns, rows: terminalSize.rows)
-
-            if AppEnvironment.sshTransportMode == .mock {
-                append("Type `help` to see mock commands.", kind: .status)
+            if host.usesPasswordAuthentication {
+                isShowingKeySetupPrompt = credentials.shouldOfferKeySetup(for: host.remoteIdentity)
             }
+            if host.transportMode == .mock {
+                appendMessage("Connected to mock shell.", kind: .status)
+            }
+        } catch let error as SSHClientError {
+            handleConnectError(error)
         } catch {
-            append(error.localizedDescription, kind: .error)
+            appendMessage(describe(error), kind: .error)
+            if !host.usesPasswordAuthentication {
+                canReconnectWithPassword = true
+            }
         }
 
         isConnecting = false
     }
 
-    func sendCommand() async {
-        let submittedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        command = ""
+    func enableSavedKey() async {
+        guard host.usesPasswordAuthentication, !isProvisioningSavedKey else { return }
 
-        guard !submittedCommand.isEmpty else { return }
+        isShowingKeySetupPrompt = false
+        isProvisioningSavedKey = true
+        appendMessage("Generating and installing a saved SSH key...", kind: .status)
+
+        do {
+            try await client.provisionSavedKey(for: host)
+            host.authentication = .automatic
+            canReconnectWithPassword = false
+            appendMessage("Saved SSH key enabled for future logins.", kind: .status)
+        } catch {
+            appendMessage(describe(error), kind: .error)
+        }
+
+        isProvisioningSavedKey = false
+    }
+
+    func dismissSavedKeyPrompt() {
+        isShowingKeySetupPrompt = false
+        credentials.dismissKeySetupPrompt(for: host.remoteIdentity)
+    }
+
+    func trustPendingHostKey() async {
+        guard let pendingHostTrust else { return }
+
+        credentials.saveTrustedHostKey(
+            TrustedSSHHostKey(
+                algorithm: pendingHostTrust.algorithm,
+                base64Payload: pendingHostTrust.base64Payload,
+                fingerprint: pendingHostTrust.fingerprint,
+                firstSeenAt: pendingHostTrust.firstSeenAt
+            ),
+            for: host.endpointIdentity
+        )
+        isShowingHostTrustPrompt = false
+        self.pendingHostTrust = nil
+        appendMessage("Trusted SSH host fingerprint \(pendingHostTrust.fingerprint).", kind: .status)
+        await connect()
+    }
+
+    func rejectPendingHostKey() {
+        guard pendingHostTrust != nil else { return }
+
+        isShowingHostTrustPrompt = false
+        pendingHostTrust = nil
+        appendMessage("Connection cancelled. SSH host key was not trusted.", kind: .status)
+    }
+
+    func reconnect(with host: Host) async {
+        await disconnect()
+        self.host = host
+        pendingHostTrust = nil
+        isShowingHostTrustPrompt = false
+        await connect()
+    }
+
+    func sendRawInput(_ bytes: [UInt8]) async {
         guard isConnected else { return }
 
         do {
-            try await client.sendInput(submittedCommand)
+            try await client.sendRawInput(bytes)
         } catch {
-            append(error.localizedDescription, kind: .error)
+            appendMessage(describe(error), kind: .error)
         }
     }
 
-    func resizeTerminal(to size: CGSize) async {
-        let nextSize = TerminalSize(viewSize: size)
-        guard nextSize != terminalSize else { return }
-
-        terminalSize = nextSize
-        await client.resizeTerminal(columns: nextSize.columns, rows: nextSize.rows)
+    func resizeTerminal(columns: Int, rows: Int) async {
+        guard columns > 0, rows > 0 else { return }
+        await client.resizeTerminal(columns: columns, rows: rows)
     }
 
     func disconnect() async {
@@ -81,112 +145,54 @@ final class TerminalSessionViewModel {
         isConnecting = false
     }
 
+    var pendingHostTrustSummary: String {
+        guard let pendingHostTrust else { return "" }
+        return "\(pendingHostTrust.algorithm) \(pendingHostTrust.fingerprint)"
+    }
+
     private func handle(_ event: TerminalEvent) {
         switch event {
-        case .output(let text):
-            appendRemoteOutput(text)
+        case .output(let bytes):
+            onTerminalOutput?(bytes)
         case .status(let text):
-            append(text, kind: .status)
+            appendMessage(text, kind: .status)
         case .error(let text):
-            append(text, kind: .error)
+            appendMessage(text, kind: .error)
         case .disconnected:
             isConnected = false
             isConnecting = false
-            activeRemoteLineID = nil
-            append("Disconnected.", kind: .status)
+            appendMessage("Disconnected.", kind: .status)
         }
     }
 
-    private func append(_ text: String, kind: TerminalLine.Kind) {
-        lines.append(TerminalLine(text: text, kind: kind))
+    private func appendMessage(_ text: String, kind: TerminalLine.Kind) {
+        messages.append(TerminalLine(text: text, kind: kind))
     }
 
-    private func appendRemoteOutput(_ chunk: String) {
-        let clearToken = "\u{001B}[2J\u{001B}[H"
-        var normalized = chunk.replacingOccurrences(of: clearToken, with: "")
+    private func handleConnectError(_ error: SSHClientError) {
+        appendMessage(error.localizedDescription, kind: .error)
 
-        if normalized.count != chunk.count {
-            lines.removeAll()
-            activeRemoteLineID = nil
-        }
-
-        normalized = stripANSIEscapeSequences(from: normalized)
-        normalized.removeAll(where: \.isCarriageReturn)
-
-        guard !normalized.isEmpty else { return }
-
-        for character in normalized {
-            if character == "\n" {
-                activeRemoteLineID = nil
-                continue
-            }
-
-            appendCharacterToRemoteLine(character)
-        }
-    }
-
-    private func appendCharacterToRemoteLine(_ character: Character) {
-        if let activeRemoteLineID,
-           let index = lines.firstIndex(where: { $0.id == activeRemoteLineID }) {
-            lines[index].text.append(character)
-            return
-        }
-
-        let line = TerminalLine(text: String(character), kind: .remoteOutput)
-        activeRemoteLineID = line.id
-        lines.append(line)
-    }
-
-    private func stripANSIEscapeSequences(from text: String) -> String {
-        var result = ""
-        var iterator = text.makeIterator()
-
-        while let character = iterator.next() {
-            guard character == "\u{001B}" else {
-                result.append(character)
-                continue
-            }
-
-            guard let next = iterator.next() else { break }
-            if next != "[" {
-                continue
-            }
-
-            while let control = iterator.next() {
-                if control.isASCIIControlTerminator {
-                    break
-                }
+        switch error {
+        case .untrustedHostKey(let hostKey):
+            pendingHostTrust = hostKey
+            isShowingHostTrustPrompt = true
+        default:
+            if !host.usesPasswordAuthentication {
+                canReconnectWithPassword = true
             }
         }
-
-        return result
-    }
-}
-
-private struct TerminalSize: Equatable {
-    let columns: Int
-    let rows: Int
-
-    init(columns: Int, rows: Int) {
-        self.columns = columns
-        self.rows = rows
     }
 
-    init(viewSize: CGSize) {
-        let characterWidth = 8.5
-        let rowHeight = 20.0
-        self.columns = max(40, Int(viewSize.width / characterWidth))
-        self.rows = max(12, Int(viewSize.height / rowHeight))
-    }
-}
+    private func describe(_ error: Error) -> String {
+        if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
+            return localized
+        }
 
-private extension Character {
-    var isASCIIControlTerminator: Bool {
-        guard let scalar = unicodeScalars.first, unicodeScalars.count == 1 else { return false }
-        return (64...126).contains(Int(scalar.value))
-    }
+        let fallback = String(describing: error)
+        if !fallback.isEmpty {
+            return fallback
+        }
 
-    var isCarriageReturn: Bool {
-        self == "\r"
+        return (error as NSError).localizedDescription
     }
 }

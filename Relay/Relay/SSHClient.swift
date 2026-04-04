@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Security
 
 struct TerminalLine: Identifiable, Equatable {
     let id = UUID()
@@ -20,30 +21,49 @@ struct TerminalLine: Identifiable, Equatable {
 }
 
 enum TerminalEvent: Sendable {
-    case output(String)
+    case output([UInt8])
     case status(String)
     case error(String)
     case disconnected
+}
+
+struct SSHHostTrustChallenge: Hashable, Sendable {
+    let algorithm: String
+    let base64Payload: String
+    let fingerprint: String
+    let firstSeenAt: Date
 }
 
 @MainActor
 protocol SSHClient {
     func setEventHandler(_ handler: (@MainActor @Sendable (TerminalEvent) -> Void)?)
     func connect(to host: Host) async throws
+    func provisionSavedKey(for host: Host) async throws
     func sendInput(_ text: String) async throws
+    func sendRawInput(_ bytes: [UInt8]) async throws
     func resizeTerminal(columns: Int, rows: Int) async
     func disconnect() async
 }
 
-enum SSHTransportMode {
+extension SSHClient {
+    func sendInput(_ text: String) async throws {
+        guard !text.isEmpty else {
+            throw SSHClientError.emptyCommand
+        }
+
+        try await sendRawInput(Array(text.utf8) + [0x0D])
+    }
+}
+
+enum SSHTransportMode: Hashable, Codable {
     case mock
     case real
 }
 
 enum SSHClientFactory {
     @MainActor
-    static func makeClient() -> SSHClient {
-        switch AppEnvironment.sshTransportMode {
+    static func makeClient(for host: Host) -> SSHClient {
+        switch host.transportMode {
         case .mock:
             MockSSHClient()
         case .real:
@@ -55,12 +75,19 @@ enum SSHClientFactory {
 enum SSHClientError: LocalizedError {
     case emptyCommand
     case missingPassword
+    case missingPrivateKey
     case notConnected
     case authenticationFailed
     case invalidChannelType
     case commandDidNotReturnOutput
     case pseudoTerminalRequestFailed
     case shellRequestFailed
+    case unsupportedHostKey
+    case untrustedHostKey(SSHHostTrustChallenge)
+    case hostKeyMismatch(expected: String, actual: String)
+    case keyProvisioningFailed(String)
+    case publicKeyVerificationFailed
+    case keychainFailure(status: OSStatus)
 
     var errorDescription: String? {
         switch self {
@@ -68,10 +95,12 @@ enum SSHClientError: LocalizedError {
             "Enter a command to run."
         case .missingPassword:
             "No SSH password is configured for this device."
+        case .missingPrivateKey:
+            "No saved SSH key is configured for this device."
         case .notConnected:
             "No active SSH session."
         case .authenticationFailed:
-            "Authentication failed. Check the SSH password and try again."
+            "Authentication failed. Check the SSH credential and try again."
         case .invalidChannelType:
             "The SSH server returned an unexpected channel type."
         case .commandDidNotReturnOutput:
@@ -80,6 +109,18 @@ enum SSHClientError: LocalizedError {
             "The SSH server rejected the terminal request."
         case .shellRequestFailed:
             "The SSH server rejected the shell request."
+        case .unsupportedHostKey:
+            "Relay could not serialize the SSH host key for trust validation."
+        case .untrustedHostKey(let hostKey):
+            "Verify the SSH host fingerprint before connecting: \(hostKey.fingerprint)"
+        case .hostKeyMismatch(let expected, let actual):
+            "SSH host identity changed. Expected \(expected), received \(actual)."
+        case .keyProvisioningFailed(let message):
+            message
+        case .publicKeyVerificationFailed:
+            "Relay installed the public key but could not verify a key-based login."
+        case .keychainFailure:
+            "Relay could not access the device keychain."
         }
     }
 }
@@ -88,6 +129,7 @@ enum SSHClientError: LocalizedError {
 final class MockSSHClient: SSHClient {
     private var activeHost: Host?
     private var currentDirectory = ""
+    private var pendingInput = ""
     private var eventHandler: (@MainActor @Sendable (TerminalEvent) -> Void)?
 
     func setEventHandler(_ handler: (@MainActor @Sendable (TerminalEvent) -> Void)?) {
@@ -102,46 +144,40 @@ final class MockSSHClient: SSHClient {
         emitPrompt()
     }
 
-    func sendInput(_ text: String) async throws {
+    func provisionSavedKey(for host: Host) async throws {
+        guard host.usesPasswordAuthentication else {
+            throw SSHClientError.missingPassword
+        }
+
+        emit(.status("Saved SSH key enabled for future logins."))
+    }
+
+    func sendRawInput(_ bytes: [UInt8]) async throws {
         guard let activeHost else {
             throw SSHClientError.notConnected
         }
 
-        for rawLine in text.split(whereSeparator: \.isNewline) {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            try await Task.sleep(for: .milliseconds(120))
-
-            if trimmed.isEmpty {
-                emitPrompt()
-                continue
-            }
-
-            emit(.output("\(activeHost.username)@\(activeHost.hostname):\(currentDirectory)$ \(trimmed)\n"))
-
-            switch trimmed {
-            case "pwd":
-                emit(.output("\(currentDirectory)\n"))
-            case "whoami":
-                emit(.output("\(activeHost.username)\n"))
-            case "hostname":
-                emit(.output("\(activeHost.hostname)\n"))
-            case "ls":
-                emit(.output("logs\nreleases\nshared\n"))
-            case "help":
-                emit(.output("Try pwd, whoami, hostname, ls, cd /tmp, uname -a\n"))
-            case "clear":
-                emit(.output("\u{001B}[2J\u{001B}[H"))
-            case "uname -a":
-                emit(.output("MockOS relay 1.0.0 Darwin Kernel Version\n"))
-            default:
-                if let directory = trimmed.removingPrefix("cd ") {
-                    currentDirectory = resolve(path: directory, from: currentDirectory)
-                } else {
-                    emit(.output("mock@\(activeHost.hostname): command not found: \(trimmed)\n"))
+        for scalar in String(decoding: bytes, as: UTF8.self).unicodeScalars {
+            switch scalar.value {
+            case 0x08, 0x7F:
+                if !pendingInput.isEmpty {
+                    pendingInput.removeLast()
+                    emitOutput("\u{0008} \u{0008}")
                 }
+            case 0x0D, 0x0A:
+                let command = pendingInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                pendingInput.removeAll()
+                emitOutput("\r\n")
+                try await Task.sleep(for: .milliseconds(80))
+                try handle(command, on: activeHost)
+                emitPrompt()
+            case 0x1B:
+                emitOutput(String(scalar))
+            default:
+                let text = String(scalar)
+                pendingInput.append(text)
+                emitOutput(text)
             }
-
-            emitPrompt()
         }
     }
 
@@ -156,12 +192,47 @@ final class MockSSHClient: SSHClient {
 
     private func emitPrompt() {
         guard let activeHost else { return }
-        emit(.output("\(activeHost.username)@\(activeHost.hostname):\(currentDirectory)$ "))
+        emitOutput("\(activeHost.username)@\(activeHost.hostname):\(currentDirectory)$ ")
+    }
+
+    private func handle(_ command: String, on activeHost: Host) throws {
+        if command.isEmpty {
+            return
+        }
+
+        switch command {
+        case "pwd":
+            emitOutput("\(currentDirectory)\r\n")
+        case "whoami":
+            emitOutput("\(activeHost.username)\r\n")
+        case "hostname":
+            emitOutput("\(activeHost.hostname)\r\n")
+        case "ls":
+            emitOutput("\u{001B}[32mlogs\u{001B}[0m  \u{001B}[34mreleases\u{001B}[0m  shared\r\n")
+        case "help":
+            emitOutput("Try pwd, whoami, hostname, ls, cd /tmp, uname -a, colors\r\n")
+        case "clear":
+            emitOutput("\u{001B}[2J\u{001B}[H")
+        case "uname -a":
+            emitOutput("MockOS relay 1.0.0 Darwin Kernel Version\r\n")
+        case "colors":
+            emitOutput("\u{001B}[31mred\u{001B}[0m \u{001B}[32mgreen\u{001B}[0m \u{001B}[34mblue\u{001B}[0m \u{001B}[7minverse\u{001B}[0m\r\n")
+        default:
+            if let directory = command.removingPrefix("cd ") {
+                currentDirectory = resolve(path: directory, from: currentDirectory)
+            } else {
+                emitOutput("mock@\(activeHost.hostname): command not found: \(command)\r\n")
+            }
+        }
     }
 
     private func emit(_ event: TerminalEvent) {
         guard let eventHandler else { return }
         eventHandler(event)
+    }
+
+    private func emitOutput(_ text: String) {
+        emit(.output(Array(text.utf8)))
     }
 
     private func resolve(path: String, from base: String) -> String {

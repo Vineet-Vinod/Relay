@@ -13,7 +13,8 @@ struct Host: Identifiable, Hashable, Codable {
     var hostname: String
     var port: Int
     var username: String
-    var password: String?
+    var transportMode: SSHTransportMode
+    var authentication: SSHAuthenticationMode
 
     init(
         id: UUID = UUID(),
@@ -21,25 +22,53 @@ struct Host: Identifiable, Hashable, Codable {
         hostname: String,
         port: Int = 22,
         username: String,
-        password: String? = nil
+        transportMode: SSHTransportMode = .real,
+        authentication: SSHAuthenticationMode = .automatic
     ) {
         self.id = id
         self.name = name
         self.hostname = hostname
         self.port = port
         self.username = username
-        self.password = password
+        self.transportMode = transportMode
+        self.authentication = authentication
     }
 }
 
 extension Host {
-    init(peer: PeerDevice, password: String? = nil, port: Int = 22) {
+    init(
+        peer: PeerDevice,
+        transportMode: SSHTransportMode = .real,
+        authentication: SSHAuthenticationMode = .automatic,
+        port: Int = 22
+    ) {
         self.init(
             name: peer.name,
-            hostname: peer.networkAddress,
+            hostname: peer.meshHostname ?? peer.networkAddress,
             port: port,
             username: peer.sshUsername,
-            password: password
+            transportMode: transportMode,
+            authentication: authentication
         )
+    }
+
+    var remoteIdentity: SSHRemoteIdentity {
+        SSHRemoteIdentity(hostname: hostname, port: port, username: username)
+    }
+
+    var endpointIdentity: SSHHostEndpointIdentity {
+        SSHHostEndpointIdentity(hostname: hostname, port: port)
+    }
+
+    var password: String? {
+        authentication.password
+    }
+
+    var usesPasswordAuthentication: Bool {
+        authentication.usesPassword
+    }
+
+    var savedKeyComment: String {
+        "relay-\(username)@\(hostname)"
     }
 }
