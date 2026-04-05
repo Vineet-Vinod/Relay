@@ -10,18 +10,10 @@ import NIOCore
 import NIOSSH
 import NIOTransportServices
 
-enum CodexBridgeEvent: Sendable {
-    case sessionReady(sessionID: String?, cwd: String?)
-    case cwdResolved(String)
-    case processStarted(Int32)
-    case assistantDelta(String)
-    case assistantDone
-    case toolStatus(String)
-    case error(message: String, recoverable: Bool)
-}
-
 @MainActor
-final class CodexBridgeClient {
+final class CodexBridgeClient: VoiceAssistantBridgeClient {
+    let assistant: VoiceAssistant = .codex
+
     private let host: Host
     private let credentials: SSHCredentialStore
 
@@ -56,7 +48,7 @@ final class CodexBridgeClient {
     func sendTurn(
         _ prompt: String,
         workspacePath: String,
-        onEvent: @escaping @MainActor (CodexBridgeEvent) -> Void
+        onEvent: @escaping @MainActor (VoiceAssistantBridgeEvent) -> Void
     ) async throws {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else {
@@ -74,7 +66,7 @@ final class CodexBridgeClient {
         let stderrBuffer = BridgeLineBuffer()
         isInterruptingTurn = false
 
-        let emit: @Sendable (CodexBridgeEvent) -> Void = { event in
+        let emit: @Sendable (VoiceAssistantBridgeEvent) -> Void = { event in
             Task { @MainActor in
                 onEvent(event)
             }
@@ -250,7 +242,7 @@ final class CodexBridgeClient {
     }
 
     nonisolated
-    private static func parseBridgeEvent(from line: String) -> CodexBridgeEvent? {
+    private static func parseBridgeEvent(from line: String) -> VoiceAssistantBridgeEvent? {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else {
@@ -379,7 +371,7 @@ final class CodexBridgeClient {
 
     private static let remoteBridgeDirectoryShell = "\"$HOME/.relay/bin\""
     private static let remoteBridgePathShell = "\"$HOME/.relay/bin/relay-codex-bridge.py\""
-    private static let bridgeVersion = "2026-04-04.5"
+    private static let bridgeVersion = "2026-04-04.6"
     private static let remoteEnvironmentBootstrap = """
     export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/bin"
     """
@@ -415,7 +407,7 @@ def resolve_cwd(raw_cwd):
     return resolved
 
 
-def collect_strings(node):
+def collect_assistant_strings(node):
     values = []
     if isinstance(node, str):
         stripped = node.strip()
@@ -424,23 +416,25 @@ def collect_strings(node):
         return values
     if isinstance(node, list):
         for item in node:
-            values.extend(collect_strings(item))
+            values.extend(collect_assistant_strings(item))
         return values
     if isinstance(node, dict):
-        for key in ("delta", "text"):
+        role = node.get("role")
+        if role not in (None, "assistant"):
+            return values
+        node_type = str(node.get("type") or "")
+        if node_type.startswith("tool") or node_type in {"thread.started", "turn.started"}:
+            return values
+        for key in ("delta", "text", "output_text"):
             value = node.get(key)
             if isinstance(value, str):
                 stripped = value.strip()
                 if stripped:
                     values.append(stripped)
-        content = node.get("content")
-        if isinstance(content, list):
-            values.extend(collect_strings(content))
-        for key, value in node.items():
-            if key in {"type", "id", "thread_id", "event_id", "status", "content", "delta", "text"}:
-                continue
+        for key in ("content", "message", "item", "parts"):
+            value = node.get(key)
             if isinstance(value, (dict, list)):
-                values.extend(collect_strings(value))
+                values.extend(collect_assistant_strings(value))
         return values
     return values
 
@@ -599,7 +593,7 @@ def main():
             if event_type == "turn.started":
                 continue
 
-            for candidate in collect_strings(event):
+            for candidate in collect_assistant_strings(event):
                 increment = normalize_increment(candidate, delivered_text)
                 if not increment:
                     continue
@@ -657,7 +651,7 @@ enum CodexBridgeClientError: LocalizedError {
     }
 }
 
-private struct BridgeSSHCommandResult: Sendable {
+struct BridgeSSHCommandResult: Sendable {
     let stdout: String
     let stderr: String
     let exitStatus: Int32
@@ -674,7 +668,7 @@ private enum BridgeSSHAuthentication {
     case privateKey(NIOSSHPrivateKey)
 }
 
-private enum BridgeSSHCommandExecutor {
+enum BridgeSSHCommandExecutor {
     static func runCommand(
         to host: Host,
         credentials: SSHCredentialStore,
@@ -868,7 +862,7 @@ private final class BridgeSSHStreamingResultBox: @unchecked Sendable {
     }
 }
 
-private final class BridgeLineBuffer: @unchecked Sendable {
+final class BridgeLineBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = Data()
 
@@ -909,7 +903,7 @@ private final class BridgeLineBuffer: @unchecked Sendable {
     }
 }
 
-private final class BridgeSSHStreamingCommandSession: @unchecked Sendable {
+final class BridgeSSHStreamingCommandSession: @unchecked Sendable {
     private let group: NIOTSEventLoopGroup
     private let rootChannel: Channel
     private let commandChannel: Channel

@@ -17,6 +17,7 @@ struct ContentView: View {
 
     @AppStorage(RelayDefaultsKey.meshProviderKind) private var providerKindRawValue = MeshProviderKind.tailscale.rawValue
     private let injectedProvider: (any MeshProvider)?
+    @State private var sessionWorkspaceManager = SessionWorkspaceManager()
     @State private var selectedTab: Tab = .devices
     @State private var tailscaleProvider = ManualDeviceProvider()
     @State private var relayProvider = RelayMeshProvider()
@@ -53,6 +54,7 @@ struct ContentView: View {
                         provider: provider,
                         isActive: true
                     )
+                    .id(provider.displayName)
                 } else {
                     Color.clear
                 }
@@ -68,6 +70,7 @@ struct ContentView: View {
                         provider: provider,
                         isActive: true
                     )
+                    .id(provider.displayName)
                 } else {
                     Color.clear
                 }
@@ -80,6 +83,7 @@ struct ContentView: View {
         .task {
             logger.info("ContentView loaded with provider kind \(self.providerKindRawValue, privacy: .public)")
         }
+        .environment(sessionWorkspaceManager)
     }
 }
 

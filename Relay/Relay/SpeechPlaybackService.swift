@@ -41,8 +41,11 @@ final class SpeechPlaybackService: NSObject {
     private var activeSpeechRange = NSRange(location: 0, length: 0)
     private var speechPendingRestart: QueuedSpeech?
     private var cancellationBehavior: CancellationBehavior = .none
+    private var isExternallyPaused = false
+    private let preferredVoice: AVSpeechSynthesisVoice?
 
     override init() {
+        self.preferredVoice = RelaySpeechVoiceResolver.preferredVoice()
         super.init()
         synthesizer.delegate = self
     }
@@ -53,6 +56,10 @@ final class SpeechPlaybackService: NSObject {
 
     var canFastForward: Bool {
         activeUtterance != nil || !pendingSpeech.isEmpty
+    }
+
+    var pendingUtteranceCount: Int {
+        pendingSpeech.count + (speechPendingRestart == nil ? 0 : 1)
     }
 
     func speak(_ text: String, rate: Float, volume: Float, kind: UtteranceKind) {
@@ -99,6 +106,7 @@ final class SpeechPlaybackService: NSObject {
 
     func stop() {
         let hadPlayback = isSpeakingOrQueued
+        isExternallyPaused = false
         pendingSpeech.removeAll()
         speechPendingRestart = nil
 
@@ -113,13 +121,43 @@ final class SpeechPlaybackService: NSObject {
         }
     }
 
+    func pausePreservingQueue() {
+        isExternallyPaused = true
+
+        guard let activeSpeech,
+              activeUtterance != nil || synthesizer.isSpeaking || synthesizer.isPaused else {
+            return
+        }
+
+        let remainingText = remainingTextForRestart(from: activeSpeech) ?? activeSpeech.text
+        let remainingSpeech = QueuedSpeech(
+            kind: activeSpeech.kind,
+            text: remainingText,
+            rate: activeSpeech.rate,
+            volume: activeSpeech.volume,
+            revealsTranscriptOnStart: false
+        )
+
+        speechPendingRestart = remainingSpeech
+        cancellationBehavior = .restart
+        synthesizer.stopSpeaking(at: .immediate)
+    }
+
+    func resumeFromPause() {
+        guard isExternallyPaused else { return }
+        isExternallyPaused = false
+        startNextUtteranceIfNeeded()
+    }
+
     private func startNextUtteranceIfNeeded() {
+        guard !isExternallyPaused else { return }
         guard activeUtterance == nil else { return }
         guard !synthesizer.isSpeaking && !synthesizer.isPaused else { return }
         guard !pendingSpeech.isEmpty else { return }
 
         let nextSpeech = pendingSpeech.removeFirst()
         let utterance = AVSpeechUtterance(string: nextSpeech.text)
+        utterance.voice = preferredVoice
         utterance.rate = nextSpeech.rate
         utterance.volume = nextSpeech.volume
         utterance.prefersAssistiveTechnologySettings = false
@@ -152,7 +190,9 @@ final class SpeechPlaybackService: NSObject {
                 pendingSpeech.insert(speechPendingRestart, at: 0)
                 self.speechPendingRestart = nil
             }
-            startNextUtteranceIfNeeded()
+            if !isExternallyPaused {
+                startNextUtteranceIfNeeded()
+            }
         }
     }
 

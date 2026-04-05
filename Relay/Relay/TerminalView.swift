@@ -11,6 +11,7 @@ import UIKit
 
 struct TerminalView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(SessionWorkspaceManager.self) private var workspaceManager
 
     @AppStorage(RelayDefaultsKey.terminalFontSize) private var terminalFontSize = RelayTerminalFontSizePreference.defaultSize
     @AppStorage(RelayDefaultsKey.bellBehavior) private var bellBehavior = RelayBellBehavior.haptic.rawValue
@@ -23,7 +24,6 @@ struct TerminalView: View {
     @State private var isShowingPasswordSheet = false
     @State private var isShowingVoiceWorkspacePicker = false
     @State private var pendingReconnectHost: Host?
-    @State private var activeVoiceSession: VoiceSessionConfiguration?
     @State private var didAttemptConnection = false
     @State private var autoReconnectTask: Task<Void, Never>?
 
@@ -34,6 +34,7 @@ struct TerminalView: View {
 
             SSHTerminalSurface(
                 bridge: terminalBridge,
+                isActive: isActive,
                 palette: palette,
                 fontSize: $terminalFontSize,
                 bellBehavior: resolvedBellBehavior,
@@ -106,7 +107,7 @@ struct TerminalView: View {
                         }
 
                         if viewModel.supportsVoiceSession {
-                            Button("Talk to Codex") {
+                            Button("Start Voice Call") {
                                 isShowingVoiceWorkspacePicker = true
                             }
                         }
@@ -182,27 +183,30 @@ struct TerminalView: View {
                 VoiceWorkspacePickerView(
                     host: viewModel.host,
                     initialWorkspacePath: viewModel.host.defaultCodexPath ?? "",
+                    initialAssistant: .codex,
                     supportsSavingDefault: false,
                     onCancel: {
                         isShowingVoiceWorkspacePicker = false
                     },
-                    onStart: { workspacePath, _ in
-                        var host = viewModel.host
+                    onStart: { assistant, workspacePath, _ in
                         let trimmedWorkspacePath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmedWorkspacePath.isEmpty else { return }
+
+                        var host = viewModel.host
                         host.defaultCodexPath = trimmedWorkspacePath
                         isShowingVoiceWorkspacePicker = false
-                        activeVoiceSession = VoiceSessionConfiguration(
-                            host: host,
-                            workspacePath: trimmedWorkspacePath
+                        workspaceManager.openVoiceTab(
+                            configuration: VoiceSessionConfiguration(
+                                host: host,
+                                workspacePath: trimmedWorkspacePath,
+                                assistant: assistant
+                            )
                         )
                     }
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             }
-        }
-        .fullScreenCover(item: $activeVoiceSession) { configuration in
-            VoiceSessionView(configuration: configuration)
         }
         .task {
             viewModel.onTerminalOutput = { bytes in
@@ -241,8 +245,12 @@ struct TerminalView: View {
         }
         .onChange(of: isActive) { _, isNowActive in
             updateIdleTimer()
-            if isNowActive, viewModel.isConnected {
-                terminalBridge.focus()
+            if isNowActive {
+                if viewModel.isConnected {
+                    terminalBridge.focus()
+                }
+            } else {
+                terminalBridge.resign()
             }
         }
         .onChange(of: viewModel.didDisconnectUnexpectedly) { _, didDisconnectUnexpectedly in
@@ -258,6 +266,7 @@ struct TerminalView: View {
         .onDisappear {
             autoReconnectTask?.cancel()
             autoReconnectTask = nil
+            terminalBridge.resign()
             if isActive {
                 UIApplication.shared.isIdleTimerDisabled = false
             }
@@ -449,6 +458,10 @@ private final class RelayTerminalBridge {
         _ = terminalView?.becomeFirstResponder()
     }
 
+    func resign() {
+        terminalView?.deactivateKeyboard()
+    }
+
     func reset() {
         pendingOutput.removeAll()
         terminalView?.feedRelayOutput(text: "\u{001B}c")
@@ -465,6 +478,7 @@ private final class RelayTerminalBridge {
 
 private struct SSHTerminalSurface: UIViewRepresentable {
     let bridge: RelayTerminalBridge
+    let isActive: Bool
     let palette: RelayTerminalPalette
     @Binding var fontSize: Double
     let bellBehavior: RelayBellBehavior
@@ -488,7 +502,9 @@ private struct SSHTerminalSurface: UIViewRepresentable {
         view.applyPreferences(fontSize: CGFloat(RelayTerminalFontSizePreference.clamp(fontSize)), bellBehavior: bellBehavior)
         bridge.attach(view)
         DispatchQueue.main.async {
-            _ = view.becomeFirstResponder()
+            if isActive {
+                view.activateKeyboardIfPossible()
+            }
         }
         return view
     }
@@ -508,9 +524,15 @@ private struct SSHTerminalSurface: UIViewRepresentable {
         uiView.applyPalette(palette)
         uiView.applyPreferences(fontSize: CGFloat(RelayTerminalFontSizePreference.clamp(fontSize)), bellBehavior: bellBehavior)
         bridge.attach(uiView)
+        if isActive {
+            uiView.activateKeyboardIfPossible()
+        } else {
+            uiView.deactivateKeyboard()
+        }
     }
 
     static func dismantleUIView(_ uiView: RelayTerminalHostView, coordinator: ()) {
+        uiView.deactivateKeyboard()
         uiView.relayBridge?.detach(uiView)
     }
 }
@@ -1025,6 +1047,18 @@ private final class RelayTerminalHostView: SwiftTerm.TerminalView, TerminalViewD
         let accessoryView = RelayTerminalAccessoryView(terminalView: self)
         relayAccessoryView = accessoryView
         inputAccessoryView = accessoryView
+    }
+
+    func activateKeyboardIfPossible() {
+        guard window != nil, !isFirstResponder else { return }
+        _ = becomeFirstResponder()
+    }
+
+    func deactivateKeyboard() {
+        if isFirstResponder {
+            _ = resignFirstResponder()
+        }
+        window?.endEditing(true)
     }
 
     @objc
