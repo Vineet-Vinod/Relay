@@ -15,7 +15,7 @@ struct ContentView: View {
     }
 
     private let provider: any MeshProvider
-    @State private var voiceCallManager = VoiceCallManager()
+    @State private var sessionWorkspaceManager = SessionWorkspaceManager()
     @State private var selectedTab: Tab = .devices
 
     init() {
@@ -44,16 +44,7 @@ struct ContentView: View {
             }
             .tag(Tab.settings)
         }
-        .environment(voiceCallManager)
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { voiceCallManager.hasActiveCalls },
-                set: { _ in }
-            )
-        ) {
-            VoiceCallWorkspaceView(provider: provider)
-                .environment(voiceCallManager)
-        }
+        .environment(sessionWorkspaceManager)
     }
 }
 

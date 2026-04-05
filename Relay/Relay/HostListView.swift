@@ -10,7 +10,7 @@ import SwiftUI
 struct HostListView: View {
     let provider: any MeshProvider
 
-    @Environment(VoiceCallManager.self) private var voiceCallManager
+    @Environment(SessionWorkspaceManager.self) private var workspaceManager
 
     @State private var snapshot: MeshProviderSnapshot = .checking
     @State private var peers: [PeerDevice] = []
@@ -23,7 +23,7 @@ struct HostListView: View {
     @State private var pendingAuthenticatedHost: Host?
     @State private var pendingLoginSessionKind: SessionKind = .terminal
     @State private var pendingLoginSavedDevice: SavedDevice?
-    @State private var destinationHost: Host?
+    @State private var isShowingWorkspace = false
     @State private var voiceWorkspaceDraft: VoiceWorkspaceDraft?
 
     var body: some View {
@@ -92,8 +92,8 @@ struct HostListView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
-        .navigationDestination(item: $destinationHost) { host in
-            TerminalWorkspaceView(provider: provider, initialHost: host)
+        .navigationDestination(isPresented: $isShowingWorkspace) {
+            SessionWorkspaceView(provider: provider)
         }
         .navigationDestination(item: $detailPeer) { peer in
             DeviceDetailView(
@@ -115,6 +115,17 @@ struct HostListView: View {
             )
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if workspaceManager.hasTabs {
+                    Button {
+                        isShowingWorkspace = true
+                    } label: {
+                        Image(systemName: "square.on.square")
+                    }
+                    .accessibilityLabel("Open workspace")
+                }
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     presentAddDeviceSheet()
@@ -454,7 +465,8 @@ struct HostListView: View {
     ) {
         switch sessionKind {
         case .terminal:
-            destinationHost = host
+            workspaceManager.openTerminalTab(for: host)
+            isShowingWorkspace = true
         case .voice:
             voiceWorkspaceDraft = VoiceWorkspaceDraft(
                 host: host,
@@ -488,13 +500,14 @@ struct HostListView: View {
 
         var host = draft.host
         host.defaultCodexPath = trimmedWorkspacePath
-        voiceCallManager.startCall(
+        workspaceManager.openVoiceTab(
             configuration: VoiceSessionConfiguration(
                 host: host,
                 workspacePath: trimmedWorkspacePath,
                 assistant: assistant
             )
         )
+        isShowingWorkspace = true
     }
 }
 
@@ -1014,5 +1027,5 @@ private struct VoiceWorkspaceDraft: Identifiable {
     NavigationStack {
         HostListView(provider: ManualDeviceProvider())
     }
-    .environment(VoiceCallManager())
+    .environment(SessionWorkspaceManager())
 }

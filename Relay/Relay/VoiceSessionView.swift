@@ -9,9 +9,15 @@ import SwiftUI
 import UIKit
 
 struct VoiceSessionView: View {
-    private static let promptEditorMinHeight = ceil(TerminalFontRegistry.terminalFont(size: 16, bold: false).lineHeight)
-    private static let promptEditorMaxHeight: CGFloat = 126
+    private static let promptEditorHorizontalPadding: CGFloat = 14
     private static let promptEditorVerticalPadding: CGFloat = 10
+    private static let promptEditorTextMinHeight =
+        ceil(TerminalFontRegistry.terminalFont(size: 16, bold: false).lineHeight)
+    private static let promptEditorTextMaxHeight: CGFloat = 126
+    private static let promptEditorMinHeight =
+        promptEditorTextMinHeight + (promptEditorVerticalPadding * 2)
+    private static let promptEditorMaxHeight =
+        promptEditorTextMaxHeight + (promptEditorVerticalPadding * 2)
     private static let collapsedPromptEditorHeight = promptEditorMinHeight
 
     @Environment(\.colorScheme) private var colorScheme
@@ -24,6 +30,7 @@ struct VoiceSessionView: View {
     @State private var isPresentingAudioRoutes = false
     @State private var isPresentingVoiceSettings = false
     @State private var isPromptFieldFocused = false
+    @State private var promptEditorBridge = VoicePromptEditorBridge()
     let viewModel: VoiceSessionViewModel
 
     var body: some View {
@@ -76,35 +83,41 @@ struct VoiceSessionView: View {
         }
         .onChange(of: isPromptFieldFocused) { _, isFocused in
             if isFocused {
+                promptEditorBridge.focus()
                 viewModel.beginManualEntry()
             } else {
+                promptEditorBridge.resign()
                 viewModel.endManualEntry()
             }
         }
         .onChange(of: viewModel.shouldShowPromptComposer) { _, shouldShowPromptComposer in
             if !shouldShowPromptComposer {
                 isPromptFieldFocused = false
+                promptEditorBridge.resign()
             }
         }
         .onChange(of: isActive) { _, active in
             if !active {
                 isPromptFieldFocused = false
+                promptEditorBridge.resign()
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                if viewModel.canSendCurrentTurn {
-                    Button("Send") {
-                        viewModel.finishCurrentTurn()
+            if isActive && isPromptFieldFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    if viewModel.canSendCurrentTurn {
+                        Button("Send") {
+                            viewModel.finishCurrentTurn()
+                            isPromptFieldFocused = false
+                        }
+                        .fontWeight(.semibold)
+                    }
+
+                    Spacer()
+
+                    Button("Done") {
                         isPromptFieldFocused = false
                     }
-                    .fontWeight(.semibold)
-                }
-
-                Spacer()
-
-                Button("Done") {
-                    isPromptFieldFocused = false
                 }
             }
         }
@@ -203,14 +216,21 @@ struct VoiceSessionView: View {
                 Text("Speak or type a prompt")
                     .font(TerminalFontRegistry.terminalSwiftUIFont(size: 16))
                     .foregroundStyle(palette.mutedColor.opacity(0.78))
-                    .padding(.leading, 1)
-                    .padding(.top, 1)
+                    .padding(.leading, Self.promptEditorHorizontalPadding)
+                    .padding(.top, Self.promptEditorVerticalPadding)
                     .allowsHitTesting(false)
             }
 
             VoicePromptEditor(
                 text: promptDraftBinding,
                 isFocused: $isPromptFieldFocused,
+                bridge: promptEditorBridge,
+                textInsets: UIEdgeInsets(
+                    top: Self.promptEditorVerticalPadding,
+                    left: Self.promptEditorHorizontalPadding,
+                    bottom: Self.promptEditorVerticalPadding,
+                    right: Self.promptEditorHorizontalPadding
+                ),
                 minHeight: Self.promptEditorMinHeight,
                 maxHeight: Self.promptEditorMaxHeight,
                 palette: palette
@@ -230,12 +250,9 @@ struct VoiceSessionView: View {
         .relayTerminalFieldBackground(
             palette,
             isFocused: isPromptFieldFocused || viewModel.status == .listening,
-            verticalPadding: Self.promptEditorVerticalPadding
+            horizontalPadding: 0,
+            verticalPadding: 0
         )
-        .contentShape(RoundedRectangle(cornerRadius: RelayTheme.Radius.input, style: .continuous))
-        .onTapGesture {
-            isPromptFieldFocused = true
-        }
     }
 
     private var promptDraftBinding: Binding<String> {
@@ -1016,6 +1033,8 @@ private struct VoicePromptEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
 
+    let bridge: VoicePromptEditorBridge
+    let textInsets: UIEdgeInsets
     let minHeight: CGFloat
     let maxHeight: CGFloat
     let palette: RelayTerminalPalette
@@ -1031,13 +1050,15 @@ private struct VoicePromptEditor: UIViewRepresentable {
         textView.textColor = palette.text
         textView.tintColor = palette.accent
         textView.font = TerminalFontRegistry.terminalFont(size: 16, bold: false)
-        textView.textContainerInset = .zero
+        textView.textContainerInset = textInsets
         textView.textContainer.lineFragmentPadding = 0
         textView.isScrollEnabled = false
         textView.keyboardDismissMode = .interactive
         textView.alwaysBounceVertical = false
         textView.showsVerticalScrollIndicator = false
         textView.showsHorizontalScrollIndicator = false
+        textView.isEditable = true
+        textView.isSelectable = true
         textView.autocapitalizationType = .none
         textView.autocorrectionType = .no
         textView.smartDashesType = .no
@@ -1045,6 +1066,7 @@ private struct VoicePromptEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .no
         textView.returnKeyType = .default
         textView.text = text
+        bridge.attach(textView)
         context.coordinator.applyFocusState(to: textView)
         context.coordinator.scrollToVisibleRange(in: textView, anchoredToBottom: !isFocused)
         return textView
@@ -1059,6 +1081,7 @@ private struct VoicePromptEditor: UIViewRepresentable {
             uiView.text = text
         }
 
+        bridge.attach(uiView)
         context.coordinator.applyFocusState(to: uiView)
         context.coordinator.scrollToVisibleRange(in: uiView, anchoredToBottom: !isFocused)
 
@@ -1079,6 +1102,10 @@ private struct VoicePromptEditor: UIViewRepresentable {
         updateScrollingState(for: uiView, contentHeight: contentHeight)
 
         return CGSize(width: proposedWidth, height: clampedHeight)
+    }
+
+    static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
+        uiView.resignFirstResponder()
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -1141,7 +1168,9 @@ private struct VoicePromptEditor: UIViewRepresentable {
 
     private func measuredContentHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
         if (textView.text ?? "").isEmpty {
-            return ceil(textView.font?.lineHeight ?? minHeight)
+            return ceil(textView.font?.lineHeight ?? 0) +
+                textInsets.top +
+                textInsets.bottom
         }
 
         let previousScrollEnabled = textView.isScrollEnabled
@@ -1171,6 +1200,25 @@ private struct VoicePromptEditor: UIViewRepresentable {
         textView.isScrollEnabled = shouldScroll
         textView.alwaysBounceVertical = shouldScroll
         textView.showsVerticalScrollIndicator = shouldScroll
+    }
+}
+
+@MainActor
+private final class VoicePromptEditorBridge {
+    private weak var textView: UITextView?
+
+    func attach(_ textView: UITextView) {
+        self.textView = textView
+    }
+
+    func focus() {
+        guard let textView, textView.window != nil, !textView.isFirstResponder else { return }
+        _ = textView.becomeFirstResponder()
+    }
+
+    func resign() {
+        guard let textView, textView.isFirstResponder else { return }
+        _ = textView.resignFirstResponder()
     }
 }
 

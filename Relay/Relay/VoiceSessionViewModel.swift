@@ -13,6 +13,9 @@ import UIKit
 @Observable
 final class VoiceSessionViewModel {
     private static let sendCuePauseDelay: Duration = .milliseconds(700)
+    private static let minimumStreamingChunkLength = 140
+    private static let preferredStreamingChunkLength = 260
+    private static let maximumStreamingChunkLength = 340
 
     enum Status: Equatable {
         case preparing
@@ -808,47 +811,89 @@ final class VoiceSessionViewModel {
         }
 
         let remaining = buffer[contentStart...]
-        if let delimiterRange = nextAssistantOutputDelimiter(in: remaining) {
+        if let delimiterRange = preferredAssistantOutputDelimiter(
+            in: remaining,
+            minimumChunkLength: Self.minimumStreamingChunkLength,
+            maximumChunkLength: Self.preferredStreamingChunkLength
+        ) {
             let chunk = String(buffer[contentStart..<delimiterRange.upperBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !chunk.isEmpty else { return nil }
             let consumedCount = buffer.distance(from: buffer.startIndex, to: delimiterRange.upperBound)
             return (chunk, consumedCount)
         }
 
-        let maxChunkLength = 110
         let remainingCount = buffer.distance(from: contentStart, to: buffer.endIndex)
-        guard remainingCount >= maxChunkLength else { return nil }
+        guard remainingCount >= Self.maximumStreamingChunkLength else { return nil }
 
-        let tentativeEnd = buffer.index(contentStart, offsetBy: maxChunkLength, limitedBy: buffer.endIndex) ?? buffer.endIndex
+        let tentativeEnd = buffer.index(
+            contentStart,
+            offsetBy: Self.maximumStreamingChunkLength,
+            limitedBy: buffer.endIndex
+        ) ?? buffer.endIndex
         let prefix = buffer[contentStart..<tentativeEnd]
-        let chunkEnd = prefix.lastIndex(where: \.isWhitespace) ?? tentativeEnd
+        let chunkEnd: String.Index
+        if let delimiterRange = preferredAssistantOutputDelimiter(
+            in: prefix,
+            minimumChunkLength: Self.minimumStreamingChunkLength,
+            maximumChunkLength: Self.maximumStreamingChunkLength
+        ) {
+            chunkEnd = delimiterRange.upperBound
+        } else {
+            chunkEnd = prefix.lastIndex(where: \.isWhitespace) ?? tentativeEnd
+        }
         let chunk = String(buffer[contentStart..<chunkEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !chunk.isEmpty else { return nil }
         let consumedCount = buffer.distance(from: buffer.startIndex, to: chunkEnd)
         return (chunk, consumedCount)
     }
 
-    private func nextAssistantOutputDelimiter(in remaining: Substring) -> Range<String.Index>? {
+    private func preferredAssistantOutputDelimiter(
+        in remaining: Substring,
+        minimumChunkLength: Int,
+        maximumChunkLength: Int
+    ) -> Range<String.Index>? {
         var index = remaining.startIndex
+        var preferredRange: Range<String.Index>?
 
         while index < remaining.endIndex {
-            let character = remaining[index]
-
-            switch character {
-            case ".", "!", "?":
-                if shouldSplitAssistantOutputSentence(in: remaining, at: index) {
-                    return index..<remaining.index(after: index)
-                }
-            case "\n":
-                let nextIndex = remaining.index(after: index)
-                if nextIndex < remaining.endIndex, remaining[nextIndex] == "\n" {
-                    return index..<remaining.index(after: nextIndex)
-                }
-            default:
+            let traversedLength = remaining.distance(from: remaining.startIndex, to: index)
+            if traversedLength > maximumChunkLength {
                 break
             }
 
+            if let delimiterRange = assistantOutputDelimiter(in: remaining, at: index) {
+                let chunkLength = remaining.distance(from: remaining.startIndex, to: delimiterRange.upperBound)
+                if chunkLength >= minimumChunkLength {
+                    preferredRange = delimiterRange
+                }
+                index = delimiterRange.upperBound
+                continue
+            }
+
             index = remaining.index(after: index)
+        }
+
+        return preferredRange
+    }
+
+    private func assistantOutputDelimiter(
+        in remaining: Substring,
+        at index: String.Index
+    ) -> Range<String.Index>? {
+        let character = remaining[index]
+
+        switch character {
+        case ".", "!", "?":
+            if shouldSplitAssistantOutputSentence(in: remaining, at: index) {
+                return index..<remaining.index(after: index)
+            }
+        case "\n":
+            let nextIndex = remaining.index(after: index)
+            if nextIndex < remaining.endIndex, remaining[nextIndex] == "\n" {
+                return index..<remaining.index(after: nextIndex)
+            }
+        default:
+            break
         }
 
         return nil

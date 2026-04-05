@@ -42,8 +42,10 @@ final class SpeechPlaybackService: NSObject {
     private var speechPendingRestart: QueuedSpeech?
     private var cancellationBehavior: CancellationBehavior = .none
     private var isExternallyPaused = false
+    private let preferredVoice: AVSpeechSynthesisVoice?
 
     override init() {
+        self.preferredVoice = RelaySpeechVoiceResolver.preferredVoice()
         super.init()
         synthesizer.delegate = self
     }
@@ -155,6 +157,7 @@ final class SpeechPlaybackService: NSObject {
 
         let nextSpeech = pendingSpeech.removeFirst()
         let utterance = AVSpeechUtterance(string: nextSpeech.text)
+        utterance.voice = preferredVoice
         utterance.rate = nextSpeech.rate
         utterance.volume = nextSpeech.volume
         utterance.prefersAssistiveTechnologySettings = false

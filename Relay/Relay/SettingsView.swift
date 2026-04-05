@@ -153,7 +153,7 @@ struct SettingsView: View {
             } header: {
                 Text("Voice")
             } footer: {
-                Text("Relay uses on-device speech recognition and text-to-speech to keep voice calls usable while the screen is not your primary focus. New voice calls start on the loudspeaker unless you pick another route.")
+                Text("Relay uses on-device speech recognition and prefers the highest-quality neutral Apple voice available for your language. New voice calls start on the loudspeaker unless you pick another route.")
             }
 
             Section {
