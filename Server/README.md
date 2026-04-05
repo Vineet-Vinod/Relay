@@ -85,12 +85,8 @@ Build and run the agent from the repo root:
 
 ```bash
 cd /Users/matthew/Projects/Catapult26/Relay/Agent
-go run . pair \
-  --server "https://192.168.1.10:8443" \
-  --code "PAIRCODE" \
-  --allow-insecure-tls
-
-go run . run
+./scripts/pair-agent.sh 192.168.1.10:8443 PAIRCODE --allow-insecure-tls
+./scripts/run-agent.sh
 ```
 
 5. Connect from the app.
