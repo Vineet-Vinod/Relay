@@ -37,17 +37,29 @@ if [[ "${server_input}" != http://* && "${server_input}" != https://* ]]; then
   server_input="https://${server_input}"
 fi
 
-extra_args=()
-if [[ $# -gt 2 ]]; then
-  extra_args=("${@:3}")
-fi
-
-if [[ "${RELAY_AGENT_ALLOW_INSECURE:-0}" == "1" ]]; then
-  extra_args=("--allow-insecure-tls" "${extra_args[@]}")
-fi
-
 cd "${agent_dir}"
+if [[ "${RELAY_AGENT_ALLOW_INSECURE:-0}" == "1" ]]; then
+  if [[ $# -gt 2 ]]; then
+    exec go run . pair \
+      --server "${server_input}" \
+      --code "${pair_code}" \
+      --allow-insecure-tls \
+      "${@:3}"
+  fi
+
+  exec go run . pair \
+    --server "${server_input}" \
+    --code "${pair_code}" \
+    --allow-insecure-tls
+fi
+
+if [[ $# -gt 2 ]]; then
+  exec go run . pair \
+    --server "${server_input}" \
+    --code "${pair_code}" \
+    "${@:3}"
+fi
+
 exec go run . pair \
   --server "${server_input}" \
-  --code "${pair_code}" \
-  "${extra_args[@]}"
+  --code "${pair_code}"

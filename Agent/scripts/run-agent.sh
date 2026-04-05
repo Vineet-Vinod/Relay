@@ -24,11 +24,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 config_path="${RELAY_AGENT_CONFIG:-}"
-extra_args=("$@")
-
-if [[ -n "${config_path}" ]]; then
-  extra_args=("--config" "${config_path}" "${extra_args[@]}")
-fi
 
 cd "${agent_dir}"
-exec go run . run "${extra_args[@]}"
+if [[ -n "${config_path}" ]]; then
+  exec go run . run --config "${config_path}" "$@"
+fi
+
+exec go run . run "$@"
