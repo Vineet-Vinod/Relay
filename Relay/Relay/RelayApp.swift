@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct RelayApp: App {
+    init() {
+        TerminalFontRegistry.registerBundledFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(RelayTheme.accent)
         }
     }
 }
