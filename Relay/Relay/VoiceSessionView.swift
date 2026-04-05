@@ -249,8 +249,8 @@ struct VoiceSessionView: View {
         VStack(spacing: RelayTheme.Spacing.section) {
             HStack(spacing: RelayTheme.Spacing.section) {
                 audioRouteButton(palette: palette)
-                muteButton(palette: palette)
                 sendButton(palette: palette)
+                muteButton(palette: palette)
             }
 
             HStack(spacing: RelayTheme.Spacing.section) {
