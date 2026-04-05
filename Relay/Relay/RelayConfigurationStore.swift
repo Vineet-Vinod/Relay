@@ -12,7 +12,6 @@ final class RelayConfigurationStore: @unchecked Sendable {
     static let shared = RelayConfigurationStore()
 
     private let defaults: UserDefaults
-    private let registrationDefaultsKey = "relay.relay.registration.v1"
     private let registrationKeychainAccount = "relay-app-registration"
     private let lock = NSLock()
     private let keychainService: String
@@ -58,7 +57,6 @@ final class RelayConfigurationStore: @unchecked Sendable {
     func registration() -> RelayAppRegistration? {
         lock.withLock {
             guard let data = loadKeychainData(account: registrationKeychainAccount) else {
-                defaults.removeObject(forKey: registrationDefaultsKey)
                 return nil
             }
 
@@ -71,14 +69,12 @@ final class RelayConfigurationStore: @unchecked Sendable {
         try lock.withLock {
             try? deleteKeychainItem(account: registrationKeychainAccount)
             try storeKeychainData(data, account: registrationKeychainAccount)
-            defaults.set(registration.appID, forKey: registrationDefaultsKey)
         }
     }
 
     func clearRegistration() {
         lock.withLock {
             try? deleteKeychainItem(account: registrationKeychainAccount)
-            defaults.removeObject(forKey: registrationDefaultsKey)
         }
     }
 

@@ -8,14 +8,14 @@
 import Foundation
 
 @MainActor
-struct RelayMeshProvider: MeshProvider {
+final class RelayMeshProvider: MeshProvider {
     let displayName = "Relay"
     let supportsManualHostManagement = false
 
     private let apiClient: RelayAPIClient
     private let configurationStore: RelayConfigurationStore
 
-    init() {
+    convenience init() {
         let configurationStore = RelayConfigurationStore.shared
         self.init(
             apiClient: RelayAPIClient(configurationStore: configurationStore),

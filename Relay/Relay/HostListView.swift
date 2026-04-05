@@ -6,9 +6,13 @@
 //
 
 import SwiftUI
+import OSLog
 
 struct HostListView: View {
     let provider: any MeshProvider
+    let isActive: Bool
+
+    private let logger = Logger(subsystem: "Relay", category: "HostListView")
 
     @State private var snapshot: MeshProviderSnapshot = .checking
     @State private var peers: [PeerDevice] = []
@@ -44,11 +48,19 @@ struct HostListView: View {
         .background(RelayTheme.surfaceBase)
         .navigationTitle("Devices")
         .task {
+            guard isActive else { return }
             guard peers.isEmpty, case .checking = snapshot.status else { return }
             await refresh()
         }
         .refreshable {
             await refresh()
+        }
+        .onChange(of: isActive) { _, isNowActive in
+            guard isNowActive else { return }
+            guard peers.isEmpty || !snapshot.status.isReadyForPeers else { return }
+            Task {
+                await refresh()
+            }
         }
         .sheet(item: $loginHost, onDismiss: presentPendingAuthenticatedHostIfNeeded) { host in
             NavigationStack {
@@ -352,6 +364,8 @@ struct HostListView: View {
     }
 
     private func refresh() async {
+        guard isActive else { return }
+        logger.info("Refreshing devices for provider \(self.provider.displayName, privacy: .public)")
         isLoading = true
         errorMessage = nil
         snapshot = await provider.currentSnapshot()
@@ -374,9 +388,11 @@ struct HostListView: View {
         } catch {
             peers = []
             errorMessage = error.localizedDescription
+            logger.error("Device refresh failed: \(error.localizedDescription, privacy: .public)")
         }
 
         isLoading = false
+        logger.info("Device refresh completed with \(self.peers.count) peers")
     }
 
     private func saveHost(_ host: SavedDevice) async {
@@ -1030,6 +1046,9 @@ private struct VoiceWorkspaceDraft: Identifiable {
 
 #Preview {
     NavigationStack {
-        HostListView(provider: ManualDeviceProvider())
+        HostListView(
+            provider: ManualDeviceProvider(),
+            isActive: true
+        )
     }
 }

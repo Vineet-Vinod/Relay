@@ -98,7 +98,8 @@ struct SavedDevice: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
-struct ManualDeviceProvider: MeshProvider {
+@MainActor
+final class ManualDeviceProvider: MeshProvider {
     let displayName = "Tailscale"
     let supportsManualHostManagement = true
 

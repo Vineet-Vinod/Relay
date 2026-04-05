@@ -7,9 +7,13 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import OSLog
 
 struct SettingsView: View {
     let provider: any MeshProvider
+    let isActive: Bool
+
+    private let logger = Logger(subsystem: "Relay", category: "SettingsView")
 
     @AppStorage(RelayDefaultsKey.useSavedKeysAutomatically) private var usesSavedKeysAutomatically = true
     @AppStorage(RelayDefaultsKey.allowPasswordFallback) private var allowsPasswordFallback = true
@@ -22,19 +26,13 @@ struct SettingsView: View {
     @AppStorage(RelayDefaultsKey.voiceOutputVolume) private var voiceOutputVolume = RelayVoicePreference.defaultOutputVolume
     @AppStorage(RelayDefaultsKey.voiceSpeaksToolStatus) private var voiceSpeaksToolStatus = false
     @AppStorage(RelayDefaultsKey.meshProviderKind) private var meshProviderKindRawValue = MeshProviderKind.tailscale.rawValue
-    @AppStorage(RelayDefaultsKey.relayServerURL) private var relayServerURL = ""
-    @AppStorage(RelayDefaultsKey.relayAllowInsecureTLS) private var relayAllowInsecureTLS = false
 
     @State private var providerSnapshot: MeshProviderSnapshot = .checking
-    @State private var storedKeys: [SSHStoredKeyRecord] = []
-    @State private var trustedHosts: [TrustedSSHHostRecord] = []
-    @State private var savedDevices: [SavedDevice] = []
-    @State private var isImportingDevices = false
-    @State private var isExportingDevices = false
-    @State private var exportDocument = SavedDevicesDocument(devices: [])
+    @State private var relaySetupSummary = "Not Configured"
     @State private var destructiveAction: SettingsDestructiveAction?
     @State private var notice: SettingsNotice?
-    @State private var relaySettingsController = RelaySettingsController()
+    @State private var hasLoaded = false
+    @State private var isReloading = false
 
     var body: some View {
         List {
@@ -74,35 +72,37 @@ struct SettingsView: View {
                 Text(providerSnapshot.status.detail)
             }
 
-            RelaySettingsSection(
-                controller: relaySettingsController,
-                serverURL: $relayServerURL,
-                allowInsecureTLS: $relayAllowInsecureTLS,
-                isSelected: selectedProviderKind == .relay
-            )
+            Section {
+                NavigationLink {
+                    RelaySetupView()
+                } label: {
+                    settingsChevronRow(
+                        title: "Relay Server",
+                        value: relaySetupSummary
+                    )
+                }
+            } header: {
+                Text("Relay")
+            } footer: {
+                Text(relaySetupFooter)
+            }
 
             Section {
                 NavigationLink {
-                    StoredSSHKeysSettingsView(records: storedKeys) { remote in
-                        RelayServices.sshCredentials.removeStoredKey(for: remote)
-                        reloadCredentialData()
-                    }
+                    StoredSSHKeysSettingsView()
                 } label: {
                     settingsChevronRow(
                         title: "Stored SSH Keys",
-                        value: storedKeys.isEmpty ? "None" : "\(storedKeys.count)"
+                        value: "Manage"
                     )
                 }
 
                 NavigationLink {
-                    TrustedHostsSettingsView(records: trustedHosts) { endpoint in
-                        RelayServices.sshCredentials.removeTrustedHostKey(for: endpoint)
-                        reloadCredentialData()
-                    }
+                    TrustedHostsSettingsView()
                 } label: {
                     settingsChevronRow(
                         title: "Trusted SSH Hosts",
-                        value: trustedHosts.isEmpty ? "None" : "\(trustedHosts.count)"
+                        value: "Manage"
                     )
                 }
 
@@ -174,14 +174,13 @@ struct SettingsView: View {
             }
 
             Section {
-                Button("Export Saved Devices") {
-                    Task {
-                        await prepareSavedDeviceExport()
-                    }
-                }
-
-                Button("Import Saved Devices") {
-                    isImportingDevices = true
+                NavigationLink {
+                    SavedDevicesSettingsView()
+                } label: {
+                    settingsChevronRow(
+                        title: "Saved Devices",
+                        value: "Manage"
+                    )
                 }
 
                 Button("Reset Trusted Hosts", role: .destructive) {
@@ -198,7 +197,7 @@ struct SettingsView: View {
             } header: {
                 Text("Data")
             } footer: {
-                Text("\(savedDevices.count) saved device\(savedDevices.count == 1 ? "" : "s") on this device.")
+                Text("Manage saved devices separately. Erasing Relay data also removes saved devices, trusted hosts, stored keys, and local Relay preferences.")
             }
 
             Section {
@@ -214,46 +213,17 @@ struct SettingsView: View {
         .background(RelayTheme.surfaceBase)
         .navigationTitle("Settings")
         .task {
+            guard isActive else { return }
+            guard !hasLoaded else { return }
+            hasLoaded = true
             await reload()
         }
         .refreshable {
             await reload()
         }
-        .fileExporter(
-            isPresented: $isExportingDevices,
-            document: exportDocument,
-            contentType: .json,
-            defaultFilename: "Relay-Saved-Devices"
-        ) { result in
-            switch result {
-            case .success:
-                notice = SettingsNotice(
-                    title: "Devices Exported",
-                    message: "Relay wrote your saved device list to a JSON file."
-                )
-            case .failure(let error):
-                notice = SettingsNotice(
-                    title: "Export Failed",
-                    message: error.localizedDescription
-                )
-            }
-        }
-        .fileImporter(
-            isPresented: $isImportingDevices,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                Task {
-                    await importSavedDevices(from: url)
-                }
-            case .failure(let error):
-                notice = SettingsNotice(
-                    title: "Import Failed",
-                    message: error.localizedDescription
-                )
+        .onChange(of: meshProviderKindRawValue) { _, _ in
+            Task {
+                await reload()
             }
         }
         .confirmationDialog(
@@ -324,9 +294,8 @@ struct SettingsView: View {
             )
 
             HStack(spacing: RelayTheme.Spacing.compact) {
-                overviewMetric(title: "Devices", value: "\(savedDevices.count)")
-                overviewMetric(title: "Saved Keys", value: "\(storedKeys.count)")
-                overviewMetric(title: "Trusted Hosts", value: "\(trustedHosts.count)")
+                overviewMetric(title: "Provider", value: provider.displayName)
+                overviewMetric(title: "Relay", value: relaySetupSummary)
             }
         }
         .relayAppCard()
@@ -393,6 +362,14 @@ struct SettingsView: View {
         RelayVoicePreference.displaySpeedLabel(forSpeechRate: voiceSpeechRate)
     }
 
+    private var relaySetupFooter: String {
+        if selectedProviderKind == .relay {
+            return "Relay routes terminal sessions through your HTTPS server and a paired macOS agent."
+        }
+
+        return "Configure Relay separately when you want to use the hosted relay path instead of direct SSH."
+    }
+
     private func overviewMetric(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: RelayTheme.Spacing.micro) {
             Text(title)
@@ -446,99 +423,62 @@ struct SettingsView: View {
     }
 
     private func reload() async {
+        guard !isReloading else { return }
+        isReloading = true
+        defer { isReloading = false }
+
+        logger.info("Reloading settings for provider \(self.provider.displayName, privacy: .public)")
         providerSnapshot = await provider.currentSnapshot()
-        savedDevices = await SavedDeviceStore.shared.hosts()
-        reloadCredentialData()
-        relaySettingsController.load()
-    }
-
-    private func reloadCredentialData() {
-        storedKeys = RelayServices.sshCredentials.storedKeyRecords()
-        trustedHosts = RelayServices.sshCredentials.trustedHostRecords()
-    }
-
-    private func prepareSavedDeviceExport() async {
-        exportDocument = SavedDevicesDocument(devices: await SavedDeviceStore.shared.hosts())
-        isExportingDevices = true
-    }
-
-    private func importSavedDevices(from url: URL) async {
-        let accessGranted = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessGranted {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        do {
-            let data = try Data(contentsOf: url)
-            let importedDevices = try JSONDecoder().decode([SavedDevice].self, from: data)
-            let mergedDevices = mergeSavedDevices(current: savedDevices, imported: importedDevices)
-            await SavedDeviceStore.shared.replaceAll(with: mergedDevices)
-            savedDevices = await SavedDeviceStore.shared.hosts()
-            notice = SettingsNotice(
-                title: "Devices Imported",
-                message: "Relay imported \(importedDevices.count) device\(importedDevices.count == 1 ? "" : "s")."
-            )
-        } catch {
-            notice = SettingsNotice(
-                title: "Import Failed",
-                message: error.localizedDescription
-            )
-        }
-    }
-
-    private func mergeSavedDevices(current: [SavedDevice], imported: [SavedDevice]) -> [SavedDevice] {
-        var merged = [String: SavedDevice]()
-        for device in current {
-            merged[savedDeviceKey(for: device)] = device
-        }
-        for device in imported {
-            merged[savedDeviceKey(for: device)] = device
-        }
-        return Array(merged.values)
-    }
-
-    private func savedDeviceKey(for device: SavedDevice) -> String {
-        "\(device.hostname.lowercased()):\(device.port):\(device.username.lowercased())"
+        logger.info("Settings provider snapshot ready")
+        relaySetupSummary = Self.makeRelaySetupSummary()
+        logger.info("Settings relay setup summary ready: \(self.relaySetupSummary, privacy: .public)")
+        logger.info("Settings reload completed")
     }
 
     private func perform(_ action: SettingsDestructiveAction) async {
         switch action {
         case .resetTrustedHosts:
             RelayServices.sshCredentials.removeAllTrustedHostKeys()
-            reloadCredentialData()
             notice = SettingsNotice(
                 title: "Trusted Hosts Cleared",
                 message: "Relay will ask you to verify SSH host fingerprints again."
             )
         case .removeSavedKeys:
             RelayServices.sshCredentials.removeAllStoredKeys()
-            reloadCredentialData()
             notice = SettingsNotice(
                 title: "Saved Keys Removed",
                 message: "Relay removed locally stored SSH private keys from the Keychain."
             )
         case .eraseRelayData:
             RelayServices.relayConfiguration.clearRegistration()
-            relaySettingsController.load()
             RelayServices.sshCredentials.eraseAllData()
             await SavedDeviceStore.shared.eraseAll()
             RelayPreferences.shared.reset()
-            savedDevices = await SavedDeviceStore.shared.hosts()
             providerSnapshot = await provider.currentSnapshot()
-            reloadCredentialData()
+            relaySetupSummary = Self.makeRelaySetupSummary()
             notice = SettingsNotice(
                 title: "Relay Data Erased",
                 message: "Saved devices, trusted hosts, keys, and local Relay preferences were removed."
             )
         }
     }
+
+    private static func makeRelaySetupSummary() -> String {
+        let store = RelayConfigurationStore.shared
+        if store.registration() != nil {
+            return "Registered"
+        }
+
+        if store.configuredServerURL() != nil {
+            return "Server Set"
+        }
+
+        return "Not Configured"
+    }
 }
 
 private struct StoredSSHKeysSettingsView: View {
-    let records: [SSHStoredKeyRecord]
-    let onDelete: (SSHRemoteIdentity) -> Void
+    @State private var records: [SSHStoredKeyRecord] = []
 
     var body: some View {
         List {
@@ -569,7 +509,8 @@ private struct StoredSSHKeysSettingsView: View {
                         }
                         .swipeActions {
                             Button(role: .destructive) {
-                                onDelete(record.remote)
+                                RelayServices.sshCredentials.removeStoredKey(for: record.remote)
+                                records.removeAll { $0.id == record.id }
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -584,12 +525,14 @@ private struct StoredSSHKeysSettingsView: View {
         .scrollContentBackground(.hidden)
         .background(RelayTheme.surfaceBase)
         .navigationTitle("Stored SSH Keys")
+        .task {
+            records = RelayServices.sshCredentials.storedKeyRecords()
+        }
     }
 }
 
 private struct TrustedHostsSettingsView: View {
-    let records: [TrustedSSHHostRecord]
-    let onDelete: (SSHHostEndpointIdentity) -> Void
+    @State private var records: [TrustedSSHHostRecord] = []
 
     var body: some View {
         List {
@@ -621,7 +564,8 @@ private struct TrustedHostsSettingsView: View {
                         }
                         .swipeActions {
                             Button(role: .destructive) {
-                                onDelete(record.endpoint)
+                                RelayServices.sshCredentials.removeTrustedHostKey(for: record.endpoint)
+                                records.removeAll { $0.id == record.id }
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -636,6 +580,172 @@ private struct TrustedHostsSettingsView: View {
         .scrollContentBackground(.hidden)
         .background(RelayTheme.surfaceBase)
         .navigationTitle("Trusted Hosts")
+        .task {
+            records = RelayServices.sshCredentials.trustedHostRecords()
+        }
+    }
+}
+
+private struct SavedDevicesSettingsView: View {
+    @State private var devices: [SavedDevice] = []
+    @State private var isImportingDevices = false
+    @State private var isExportingDevices = false
+    @State private var exportDocument = SavedDevicesDocument(devices: [])
+    @State private var notice: SettingsNotice?
+    @State private var hasLoaded = false
+
+    var body: some View {
+        List {
+            if devices.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No Saved Devices",
+                        systemImage: "desktopcomputer",
+                        description: Text("Add devices from the Devices tab, then manage import and export here.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+            } else {
+                Section {
+                    ForEach(devices) { device in
+                        VStack(alignment: .leading, spacing: RelayTheme.Spacing.tight) {
+                            Text(device.name)
+                                .font(.headline)
+
+                            Text("\(device.username)@\(device.hostname):\(device.port)")
+                                .font(TerminalFontRegistry.terminalSwiftUIFont(size: 13))
+                                .foregroundStyle(.secondary)
+
+                            if let defaultCodexPath = device.defaultCodexPath, !defaultCodexPath.isEmpty {
+                                Text(defaultCodexPath)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                Task {
+                                    await SavedDeviceStore.shared.remove(id: device.id)
+                                    devices.removeAll { $0.id == device.id }
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Button("Export Saved Devices") {
+                    Task {
+                        exportDocument = SavedDevicesDocument(devices: await SavedDeviceStore.shared.hosts())
+                        isExportingDevices = true
+                    }
+                }
+
+                Button("Import Saved Devices") {
+                    isImportingDevices = true
+                }
+            } footer: {
+                Text("\(devices.count) saved device\(devices.count == 1 ? "" : "s") on this device.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(RelayTheme.surfaceBase)
+        .navigationTitle("Saved Devices")
+        .task {
+            guard !hasLoaded else { return }
+            hasLoaded = true
+            devices = await SavedDeviceStore.shared.hosts()
+        }
+        .fileExporter(
+            isPresented: $isExportingDevices,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: "Relay-Saved-Devices"
+        ) { result in
+            switch result {
+            case .success:
+                notice = SettingsNotice(
+                    title: "Devices Exported",
+                    message: "Relay wrote your saved device list to a JSON file."
+                )
+            case .failure(let error):
+                notice = SettingsNotice(
+                    title: "Export Failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+        .fileImporter(
+            isPresented: $isImportingDevices,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task {
+                    await importSavedDevices(from: url)
+                }
+            case .failure(let error):
+                notice = SettingsNotice(
+                    title: "Import Failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+        .alert(item: $notice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private func importSavedDevices(from url: URL) async {
+        let accessGranted = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let importedDevices = try JSONDecoder().decode([SavedDevice].self, from: data)
+            let mergedDevices = mergeSavedDevices(current: devices, imported: importedDevices)
+            await SavedDeviceStore.shared.replaceAll(with: mergedDevices)
+            devices = await SavedDeviceStore.shared.hosts()
+            notice = SettingsNotice(
+                title: "Devices Imported",
+                message: "Relay imported \(importedDevices.count) device\(importedDevices.count == 1 ? "" : "s")."
+            )
+        } catch {
+            notice = SettingsNotice(
+                title: "Import Failed",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    private func mergeSavedDevices(current: [SavedDevice], imported: [SavedDevice]) -> [SavedDevice] {
+        var merged = [String: SavedDevice]()
+        for device in current {
+            merged[savedDeviceKey(for: device)] = device
+        }
+        for device in imported {
+            merged[savedDeviceKey(for: device)] = device
+        }
+        return Array(merged.values)
+    }
+
+    private func savedDeviceKey(for device: SavedDevice) -> String {
+        "\(device.hostname.lowercased()):\(device.port):\(device.username.lowercased())"
     }
 }
 

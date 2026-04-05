@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 @MainActor
 struct ContentView: View {
@@ -17,6 +18,10 @@ struct ContentView: View {
     @AppStorage(RelayDefaultsKey.meshProviderKind) private var providerKindRawValue = MeshProviderKind.tailscale.rawValue
     private let injectedProvider: (any MeshProvider)?
     @State private var selectedTab: Tab = .devices
+    @State private var tailscaleProvider = ManualDeviceProvider()
+    @State private var relayProvider = RelayMeshProvider()
+
+    private let logger = Logger(subsystem: "Relay", category: "ContentView")
 
     init() {
         self.injectedProvider = nil
@@ -32,13 +37,25 @@ struct ContentView: View {
         }
 
         let kind = MeshProviderKind(rawValue: providerKindRawValue) ?? .tailscale
-        return MeshProviderFactory.makeProvider(for: kind)
+        switch kind {
+        case .tailscale:
+            return tailscaleProvider
+        case .relay:
+            return relayProvider
+        }
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
-                HostListView(provider: provider)
+                if selectedTab == .devices {
+                    HostListView(
+                        provider: provider,
+                        isActive: true
+                    )
+                } else {
+                    Color.clear
+                }
             }
             .tabItem {
                 Label("Devices", systemImage: "desktopcomputer")
@@ -46,12 +63,22 @@ struct ContentView: View {
             .tag(Tab.devices)
 
             NavigationStack {
-                SettingsView(provider: provider)
+                if selectedTab == .settings {
+                    SettingsView(
+                        provider: provider,
+                        isActive: true
+                    )
+                } else {
+                    Color.clear
+                }
             }
             .tabItem {
                 Label("Settings", systemImage: "gearshape")
             }
             .tag(Tab.settings)
+        }
+        .task {
+            logger.info("ContentView loaded with provider kind \(self.providerKindRawValue, privacy: .public)")
         }
     }
 }

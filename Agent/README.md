@@ -19,8 +19,8 @@ This writes `~/.relay-agent/config.json`.
 ## Run
 
 ```bash
-cd /Users/matthew/Projects/Catapult26/Relay/Agent
-go run . run
+cd Agent
+go run .
 ```
 
 The agent reconnects automatically if the server drops.
