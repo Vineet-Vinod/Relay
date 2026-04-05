@@ -17,7 +17,6 @@ enum RelayURLSessionFactory {
         let configuration = URLSessionConfiguration.default
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 10
-        configuration.timeoutIntervalForResource = 15
         return URLSession(
             configuration: configuration,
             delegate: RelayNetworkSessionDelegate(allowInsecureTLS: allowInsecureTLS),

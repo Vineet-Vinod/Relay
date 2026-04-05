@@ -734,13 +734,18 @@ private final class RelayTerminalAccessoryView: UIInputView, UIInputViewAudioFee
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true
+        scrollView.contentInsetAdjustmentBehavior = .never
         addSubview(scrollView)
+
+        let contentView = UIView()
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(contentView)
 
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.axis = .horizontal
         stackView.alignment = .center
         stackView.spacing = RelayTheme.Spacing.tight
-        scrollView.addSubview(stackView)
+        contentView.addSubview(stackView)
 
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 56),
@@ -751,12 +756,15 @@ private final class RelayTerminalAccessoryView: UIInputView, UIInputViewAudioFee
             scrollView.topAnchor.constraint(equalTo: topAnchor, constant: RelayTheme.Spacing.tight),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -RelayTheme.Spacing.micro),
-            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
-            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: RelayTheme.Spacing.compact),
-            stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -RelayTheme.Spacing.compact),
-            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
-            stackView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -RelayTheme.Spacing.micro),
+            contentView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            contentView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            contentView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
+            stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: RelayTheme.Spacing.compact),
+            stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -RelayTheme.Spacing.compact),
+            stackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         ])
 
         RelayTerminalAccessoryAction.allCases.forEach { action in
