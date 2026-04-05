@@ -6,11 +6,13 @@
 //
 
 import Foundation
+import OSLog
 
 @MainActor
 final class RelaySessionClient: NSObject, TerminalSessionClient {
     let host: Host
 
+    private let logger = Logger(subsystem: "Relay", category: "RelaySessionClient")
     private let apiClient: RelayAPIClient
     private let configurationStore: RelayConfigurationStore
 
@@ -49,24 +51,38 @@ final class RelaySessionClient: NSObject, TerminalSessionClient {
             throw RelaySessionError.invalidResponse
         }
 
-        let bootstrap = try await apiClient.createSession(for: target.deviceID, columns: 80, rows: 24)
-        let request = try websocketRequest(for: bootstrap)
-        let session = RelayURLSessionFactory.makeSession(allowInsecureTLS: configurationStore.allowsInsecureTLS())
-        let task = session.webSocketTask(with: request)
+        do {
+            let bootstrap = try await apiClient.createSession(for: target.deviceID, columns: 80, rows: 24)
+            let request = try websocketRequest(for: bootstrap)
+            let session = RelayURLSessionFactory.makeSession(allowInsecureTLS: configurationStore.allowsInsecureTLS())
+            let task = session.webSocketTask(with: request)
 
-        webSocketSession = session
-        webSocketTask = task
-        sessionID = bootstrap.sessionID
-        task.resume()
+            logger.info(
+                "Opening Relay websocket for \(self.host.name, privacy: .public) at \(bootstrap.websocketURL.absoluteString, privacy: .public)"
+            )
 
-        let ready = try await waitForReadyMessage(on: task)
-        guard ready else {
-            throw RelaySessionError.sessionRejected("Relay could not start the remote shell session.")
-        }
+            webSocketSession = session
+            webSocketTask = task
+            sessionID = bootstrap.sessionID
+            task.resume()
 
-        isConnected = true
-        receiveTask = Task { [weak self] in
-            await self?.receiveLoop()
+            let ready = try await waitForReadyMessage(on: task)
+            guard ready else {
+                throw RelaySessionError.sessionRejected("Relay could not start the remote shell session.")
+            }
+
+            isConnected = true
+            receiveTask = Task { [weak self] in
+                await self?.receiveLoop()
+            }
+        } catch {
+            logger.error("Relay websocket connect failed for \(self.host.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            resetConnectionState()
+            throw mapRelayTransportError(
+                error,
+                serverURL: configurationStore.configuredServerURL(),
+                operation: "the terminal session"
+            )
         }
     }
 
@@ -107,6 +123,10 @@ final class RelaySessionClient: NSObject, TerminalSessionClient {
             try? await send(closeEnvelope, on: webSocketTask)
         }
 
+        resetConnectionState()
+    }
+
+    private func resetConnectionState() {
         receiveTask?.cancel()
         receiveTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
@@ -149,6 +169,9 @@ final class RelaySessionClient: NSObject, TerminalSessionClient {
             case "error":
                 let message = envelope.payload?.message ?? "Relay rejected the session."
                 throw RelaySessionError.sessionRejected(message)
+            case "session.closed":
+                let reason = envelope.payload?.reason ?? "Relay closed the session before the shell was ready."
+                throw RelaySessionError.sessionRejected(reason)
             default:
                 break
             }
@@ -166,6 +189,9 @@ final class RelaySessionClient: NSObject, TerminalSessionClient {
                 let envelope = try decodeEnvelope(from: message)
                 handle(envelope)
             } catch {
+                if !Task.isCancelled {
+                    logger.error("Relay receive loop ended for \(self.host.name, privacy: .public): \(String(describing: error), privacy: .public)")
+                }
                 break
             }
         }

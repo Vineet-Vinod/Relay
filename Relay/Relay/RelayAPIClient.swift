@@ -73,13 +73,13 @@ final class RelayAPIClient {
         return try await send(request, using: session)
     }
 
-    func createSession(for deviceID: UUID, columns: Int, rows: Int) async throws -> RelaySessionBootstrap {
+    func createSession(for deviceID: String, columns: Int, rows: Int) async throws -> RelaySessionBootstrap {
         let registration = try registration()
         let serverURL = try configuredServerURL()
         let session = RelayURLSessionFactory.makeSession(allowInsecureTLS: configurationStore.allowsInsecureTLS())
 
         struct RequestBody: Codable {
-            let deviceID: UUID
+            let deviceID: String
             let cols: Int
             let rows: Int
 
@@ -97,6 +97,7 @@ final class RelayAPIClient {
             bearerToken: registration.appToken
         )
 
+        logger.info("Creating Relay session for device id \(deviceID, privacy: .public)")
         return try await send(request, using: session)
     }
 
@@ -139,7 +140,17 @@ final class RelayAPIClient {
     }
 
     private func send<Response: Decodable>(_ request: URLRequest, using session: URLSession) async throws -> Response {
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw mapRelayTransportError(
+                error,
+                serverURL: request.url,
+                operation: "the request to the Relay server"
+            )
+        }
         guard let httpResponse = response as? HTTPURLResponse else {
             throw RelaySessionError.invalidResponse
         }

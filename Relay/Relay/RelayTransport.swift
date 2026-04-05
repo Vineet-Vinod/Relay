@@ -8,7 +8,7 @@
 import Foundation
 
 struct RelaySessionTarget: Hashable, Codable, Sendable {
-    let deviceID: UUID
+    let deviceID: String
     let deviceName: String
     let ownerName: String
     let platform: String
@@ -42,7 +42,7 @@ struct RelayPairingCode: Hashable, Codable, Sendable {
 }
 
 struct RelayPairedDevice: Hashable, Codable, Sendable {
-    let id: UUID
+    let id: String
     let name: String
     let ownerName: String
     let platform: String
@@ -125,6 +125,8 @@ enum RelaySessionError: LocalizedError {
     case invalidServerURL
     case invalidResponse
     case responseDecodingFailed(String)
+    case serverOffline(String)
+    case connectionFailed(String)
     case notConnected
     case sessionRejected(String)
     case serverError(String)
@@ -140,6 +142,10 @@ enum RelaySessionError: LocalizedError {
         case .invalidResponse:
             return "Relay received an invalid response from the server."
         case .responseDecodingFailed(let message):
+            return message
+        case .serverOffline(let message):
+            return message
+        case .connectionFailed(let message):
             return message
         case .notConnected:
             return "No active Relay session."

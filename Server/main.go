@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
 	"net/http"
 	"os"
@@ -35,6 +36,11 @@ func main() {
 		Addr:              cfg.HTTPAddr,
 		Handler:           server.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			NextProtos: []string{"http/1.1"},
+		},
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 	}
 
 	logger.Printf("listening on %s", cfg.HTTPAddr)

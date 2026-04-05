@@ -56,8 +56,8 @@ final class RelayMeshProvider: MeshProvider {
         let serverLabel = configurationStore.configuredServerURL()?.host ?? "Relay"
         return try await apiClient.fetchDevices().map { device in
             PeerDevice(
-                id: device.id,
-                providerIdentifier: MeshProviderKind.relay.rawValue,
+                id: UUID(uuidString: device.id) ?? UUID(),
+                providerIdentifier: device.id,
                 name: device.name,
                 networkAddress: "via \(serverLabel)",
                 meshHostname: nil,
@@ -83,7 +83,7 @@ final class RelayMeshProvider: MeshProvider {
             authentication: .automatic,
             transport: .relay(
                 RelaySessionTarget(
-                    deviceID: peer.id,
+                    deviceID: peer.providerIdentifier,
                     deviceName: peer.name,
                     ownerName: peer.ownerName,
                     platform: peer.operatingSystem

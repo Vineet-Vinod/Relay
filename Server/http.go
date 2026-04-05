@@ -187,6 +187,8 @@ func (s *Server) handleCreateSession(writer http.ResponseWriter, request *http.R
 		return
 	}
 
+	s.logger.Printf("create session request: app=%s device_id=%s", app.ID, agentID)
+
 	agent, ok := s.store.AgentByID(agentID)
 	if !ok || agent.AppID != app.ID {
 		writeError(writer, http.StatusNotFound, errors.New("paired device not found"))
@@ -259,6 +261,13 @@ func (s *Server) handleAgentWebSocket(writer http.ResponseWriter, request *http.
 }
 
 func (s *Server) handleSessionWebSocket(writer http.ResponseWriter, request *http.Request) {
+	s.logger.Printf(
+		"session websocket request: method=%s proto=%s remote=%s",
+		request.Method,
+		request.Proto,
+		request.RemoteAddr,
+	)
+
 	token := strings.TrimSpace(request.URL.Query().Get("session_token"))
 	if token == "" {
 		writeError(writer, http.StatusUnauthorized, errors.New("session_token is required"))
