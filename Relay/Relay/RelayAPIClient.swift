@@ -6,10 +6,12 @@
 //
 
 import Foundation
+import OSLog
 
 @MainActor
 final class RelayAPIClient {
     private let configurationStore: RelayConfigurationStore
+    private let logger = Logger(subsystem: "Relay", category: "RelayAPIClient")
 
     convenience init() {
         self.init(configurationStore: .shared)
@@ -143,7 +145,13 @@ final class RelayAPIClient {
         }
 
         if (200...299).contains(httpResponse.statusCode) {
-            return try JSONDecoder.relay.decode(Response.self, from: data)
+            do {
+                return try JSONDecoder.relay.decode(Response.self, from: data)
+            } catch {
+                let bodyPreview = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
+                logger.error("Relay decode failed for \(request.url?.absoluteString ?? "<unknown>", privacy: .public): \(String(describing: error), privacy: .public) body=\(bodyPreview, privacy: .public)")
+                throw RelaySessionError.responseDecodingFailed("Relay could not read the server response.")
+            }
         }
 
         if let serverError = try? JSONDecoder().decode(RelayServerErrorEnvelope.self, from: data) {

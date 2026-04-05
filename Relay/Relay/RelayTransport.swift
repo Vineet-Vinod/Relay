@@ -23,11 +23,22 @@ struct RelayAppRegistration: Hashable, Codable, Sendable {
     let appID: String
     let appToken: String
     let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case appID = "app_id"
+        case appToken = "app_token"
+        case createdAt = "created_at"
+    }
 }
 
 struct RelayPairingCode: Hashable, Codable, Sendable {
     let code: String
     let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case code
+        case expiresAt = "expires_at"
+    }
 }
 
 struct RelayPairedDevice: Hashable, Codable, Sendable {
@@ -37,12 +48,27 @@ struct RelayPairedDevice: Hashable, Codable, Sendable {
     let platform: String
     let online: Bool
     let lastSeenAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case ownerName = "owner_name"
+        case platform
+        case online
+        case lastSeenAt = "last_seen_at"
+    }
 }
 
 struct RelaySessionBootstrap: Hashable, Codable, Sendable {
     let sessionID: String
     let websocketURL: URL
     let sessionToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case websocketURL = "websocket_url"
+        case sessionToken = "session_token"
+    }
 }
 
 struct RelaySessionEnvelope: Hashable, Codable, Sendable {
@@ -98,6 +124,7 @@ enum RelaySessionError: LocalizedError {
     case missingRegistration
     case invalidServerURL
     case invalidResponse
+    case responseDecodingFailed(String)
     case notConnected
     case sessionRejected(String)
     case serverError(String)
@@ -112,6 +139,8 @@ enum RelaySessionError: LocalizedError {
             return "Relay could not parse the configured server URL."
         case .invalidResponse:
             return "Relay received an invalid response from the server."
+        case .responseDecodingFailed(let message):
+            return message
         case .notConnected:
             return "No active Relay session."
         case .sessionRejected(let reason):
